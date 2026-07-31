@@ -73,6 +73,9 @@ def test_promote_job_commits_and_reports(capsys) -> None:
     assert rc == 0
     assert db.commits == 1
     assert "tracked=1 surfaced=1" in out.out
+    # the gate result is persisted to the row (repos.significance_score/vars)
+    significance_updates = [sql for sql, _ in db.executed if "significance_score" in sql]
+    assert len(significance_updates) == 1
 
 
 def test_momentum_job_commits_and_reports(capsys) -> None:

@@ -170,6 +170,7 @@ class FakeStore:
         self.tracked_not_surfaced: list[tuple] = list(tracked_not_surfaced or [])
         self.tracked_promotions: list[int] = []
         self.surfaced_promotions: list[tuple[int, str]] = []
+        self.significance_stored: list[tuple[int, float, dict]] = []
         # momentum pipeline
         self.snapshot_repo_ids: list[int] = list(snapshot_repo_ids or [])
         self.momentum_snapshots: dict[int, list[tuple]] = dict(momentum_snapshots or {})
@@ -224,6 +225,9 @@ class FakeStore:
     def promote_to_surfaced(self, repo_id: int, surfaced_at: str) -> int:
         self.surfaced_promotions.append((repo_id, surfaced_at))
         return 1
+
+    def store_significance(self, repo_id: int, score: float, decomposition: dict) -> None:
+        self.significance_stored.append((repo_id, score, decomposition))
 
     def list_snapshot_repo_ids(self, limit: int = 100, offset: int = 0) -> list[int]:
         self.repo_id_calls.append((limit, offset))

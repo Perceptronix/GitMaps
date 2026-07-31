@@ -99,6 +99,13 @@ UPDATE repos SET surfaced = true, surfaced_at = %s
 WHERE id = %s AND NOT surfaced
 """
 
+SET_SIGNIFICANCE_SQL = """
+UPDATE repos SET
+    significance_score = %s,
+    significance_vars = %s
+WHERE id = %s
+"""
+
 DUE_DEEP_SQL = """
 SELECT r.id, r.owner, r.name FROM repos r
 LEFT JOIN LATERAL (
@@ -337,6 +344,10 @@ class RepoStore:
     def promote_to_surfaced(self, repo_id: int, surfaced_at: str) -> int:
         """Promote a tracked repo to surfaced (records surfaced_at, once)."""
         return self._db.execute(PROMOTE_TO_SURFACED_SQL, (surfaced_at, repo_id)).rowcount
+
+    def store_significance(self, repo_id: int, score: float, decomposition: dict) -> None:
+        """Persist the gate result + its decomposition (transparency, ADR-0002)."""
+        self._db.execute(SET_SIGNIFICANCE_SQL, (score, json.dumps(decomposition), repo_id))
 
     # -- momentum pipeline (architecture §5) ---------------------------------
 

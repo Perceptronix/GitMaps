@@ -213,6 +213,17 @@ def test_promote_to_surfaced_sql() -> None:
     assert params == ("2026-07-31T12:00:00Z", 42)
 
 
+def test_store_significance_sql() -> None:
+    db = FakeDb()
+    RepoStore(db).store_significance(42, 0.705882, {"threshold": 0.5})
+
+    sql, params = db.executed[-1]
+    assert "significance_score = %s" in sql
+    assert "significance_vars = %s" in sql
+    assert "WHERE id = %s" in sql
+    assert params == (0.705882, '{"threshold": 0.5}', 42)
+
+
 def test_touch_snapshot_times_sets_both_columns() -> None:
     db = FakeDb()
     RepoStore(db).touch_snapshot_times(1001)

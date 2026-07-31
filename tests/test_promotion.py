@@ -122,6 +122,31 @@ def test_runner_mixed_batch() -> None:
     assert store.surfaced_promotions == [(1, STAMP), (3, STAMP)]
 
 
+def test_runner_persists_significance_for_every_evaluated_repo() -> None:
+    store = FakeStore(
+        candidates=[cand_row(1, **SIGNIFICANT), cand_row(2, **FRINGE), cand_row(4, **NEITHER)],
+        tracked_not_surfaced=[cand_row(3, tracked=True, **SIGNIFICANT)],
+    )
+
+    make_runner(store).run()
+
+    # Every evaluated repo (candidates + tracked-not-surfaced) gets its gate
+    # result persisted — surfaced or not — so the "why"/"why not" is
+    # transparent on the row (ADR-0002, repos.significance_* columns).
+    stored = {repo_id: (score, decomp) for repo_id, score, decomp in store.significance_stored}
+    assert set(stored) == {1, 2, 3, 4}
+    for repo_id in (1, 2, 3, 4):
+        score, decomp = stored[repo_id]
+        assert isinstance(score, float)
+        assert decomp["threshold"] == DEFAULT.threshold
+        assert set(decomp["components"]) == {
+            "momentum", "recency", "contributors", "substance", "engagement",
+        }
+        # the contribution sum reconstructs the persisted score (transparency)
+        total = sum(c["contribution"] for c in decomp["components"].values())
+        assert round(total, 6) == round(score, 6)
+
+
 def sig(**kw) -> RepoSignals:
     base: dict = {
         "id": 1, "stars": 0, "forks": 0, "contributors": None,
@@ -215,7 +240,9 @@ def test_missing_dates_are_neutral() -> None:
 
     # no age / no push -> no momentum, no recency, no fringe
     # substance = 0.5*1 (description) + 0.3*min(1/3,1) (topics) = 0.6
-    assert round(ev.significance, 3) == round(0.2 * 0.6, 3)
+    # contributors is unknown, so it is excluded and the remaining weights
+    # (0.35+0.2+0.2+0.1 = 0.85) are renormalized: 0.6 * 0.2/0.85 = 0.141
+    assert round(ev.significance, 3) == round(0.6 * 0.2 / 0.85, 3)
     assert not ev.promote_tracked
     assert not ev.promote_surfaced
 
@@ -227,10 +254,15 @@ def test_unknown_contributors_are_neutral() -> None:
     known = evaluate(sig(**base, contributors=100), DEFAULT, NOW)
 
     # no topics in base -> substance = 0.5*1 = 0.5
-    # unknown: 0.35*0.8 + 0.2*1.0 + 0*0.15 + 0.2*0.5 + 0.1*0.2 = 0.60
-    # known:   +0.15*1.0 = 0.75
-    assert round(unknown.significance, 3) == 0.60
+    # unknown: contributors excluded, remaining weights renormalized to sum 1
+    #   (0.35*0.8 + 0.2*1.0 + 0.2*0.5 + 0.1*0.2) / 0.85 = 0.60/0.85 = 0.706
+    # known:   all signals available -> 0.75
+    assert round(unknown.significance, 3) == round(0.60 / 0.85, 3)
     assert round(known.significance, 3) == 0.75
+    # the exclusion is transparent in the decomposition
+    assert unknown.decomposition["renormalized"] is True
+    assert "contributors" in unknown.decomposition["unavailable"]
+    assert known.decomposition["renormalized"] is False
 
 
 def test_decomposition_is_transparent() -> None:
