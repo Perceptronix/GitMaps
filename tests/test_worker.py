@@ -109,7 +109,7 @@ def test_embed_job_commits_and_reports(capsys) -> None:
     out = capsys.readouterr()
     assert rc == 0
     assert db.commits == 1
-    assert "embed: seen=1 embedded=1 skipped=0 model=local-hash-v1:384" in out.out
+    assert "embed: seen=1 embedded=1 skipped=0 model=sentence-transformers/all-MiniLM-L6-v2:384" in out.out
 
 
 def test_unknown_job_prints_usage(capsys) -> None:

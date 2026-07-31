@@ -20,7 +20,7 @@ import pytest
 from gitmaps.db import Db
 from gitmaps.embeddings import (
     EmbeddingRunner,
-    LocalHashEmbedder,
+    SentenceTransformerEmbedder,
     compose_semantic_text,
     semantic_fingerprint,
 )
@@ -85,6 +85,21 @@ class StubReadmeClient:
         return FIXTURE_README
 
 
+class StubSentenceModel:
+    """Duck-typed SentenceTransformer: deterministic 384-d normalized vectors.
+
+    Keeps the live test hermetic and fast — the real model is exercised by the
+    re-embed validation run, not by the suite's DB round-trip test.
+    """
+
+    def __init__(self) -> None:
+        self.dimension = 384
+        self.component = 1.0 / 384**0.5
+
+    def encode(self, texts, normalize_embeddings: bool = True) -> list[list[float]]:
+        return [[self.component] * self.dimension for _ in texts]
+
+
 def _insert_fixture(db: Db) -> None:
     past = (NOW - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     db.execute(
@@ -116,7 +131,14 @@ def test_embedding_pipeline_against_supabase_and_rolls_back(live_db: Db) -> None
     store = RepoStore(db)
     _insert_fixture(db)
 
-    provider = LocalHashEmbedder(dimension=384)
+    # A live re-embed may have recorded the model version already; reset it
+    # inside this transaction (rolled back below) so run 1 deterministically
+    # exercises the full pass.
+    db.execute("DELETE FROM ingestion_state WHERE key = 'embedding_model_version'")
+
+    provider = SentenceTransformerEmbedder(
+        dimension=384, sentence_transformer=StubSentenceModel()
+    )
     runner = EmbeddingRunner(StubReadmeClient(), store, provider, now=lambda: NOW)
 
     # Run 1 — full pass (no model version recorded yet): the fixture is embedded.
@@ -154,7 +176,7 @@ def test_embedding_pipeline_against_supabase_and_rolls_back(live_db: Db) -> None
     assert embedded_at2 is not None
 
     # Progress + model version were recorded (universe-wide, so lower-bounded).
-    assert store.get_state("embedding_model_version") == "local-hash-v1:384"
+    assert store.get_state("embedding_model_version") == "sentence-transformers/all-MiniLM-L6-v2:384"
     assert store.get_state("embedding.last_run_at") == STAMP
 
 

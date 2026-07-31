@@ -28,19 +28,17 @@ worker, or momentum engine (it shares only the HTTP client and timeutil).
 from __future__ import annotations
 
 import hashlib
-import math
-import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
 import requests
 
 from gitmaps.github.client import GitHubApiError, RateLimitError
 from gitmaps.timeutil import utc_stamp
 
-DEFAULT_MODEL = "local-hash-v1"
+DEFAULT_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 DEFAULT_DIMENSION = 384
 
 #: Documented ingestion_state key (ticket 08 convention): the embedding model
@@ -84,38 +82,51 @@ class EmbeddingProvider(ABC):
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
         """Embed a batch of texts into fixed-dimension vectors."""
 
-    @abstractmethod
     def embed_query(self, query: str) -> list[float]:
-        """Embed a single search query into one vector."""
+        """Embed a single search query into one vector (batch of one)."""
+        return self.embed([query])[0]
 
 
-class LocalHashEmbedder(EmbeddingProvider):
-    """Deterministic, dependency-free local embedder (feature-hashed bag-of-words).
+class SentenceTransformerEmbedder(EmbeddingProvider):
+    """A real open sentence-encoder via sentence-transformers (D-05, D-11).
 
-    Each token maps to `dimension` buckets via two stable MD5 hashes — one for
-    the bucket, one for the sign — and the weighted counts are L2-normalized,
-    so the result is a real vector in a cosine space. Deterministic (same text
-    → same vector, across processes and restarts) and self-hosted (D-05).
-    Semantically crude next to a sentence-transformer; that is the point of
-    the seam — swap in a real model by implementing `EmbeddingProvider`.
+    Default local model: `sentence-transformers/all-MiniLM-L6-v2` — the compact
+    384-d encoder the migration's vector(384) is dimensioned for (architecture
+    §7). Vectors are L2-normalized so cosine distance == euclidean distance.
+    The model loads lazily on the first embed (once per process, §7) and may
+    be injected (`sentence_transformer`) so unit tests never load a real model;
+    the swap-in proves the seam — the pipeline never changes.
     """
 
-    def __init__(self, *, dimension: int = DEFAULT_DIMENSION, model_name: str = DEFAULT_MODEL) -> None:
+    def __init__(
+        self,
+        *,
+        model_name: str = DEFAULT_MODEL,
+        dimension: int = DEFAULT_DIMENSION,
+        sentence_transformer: Any | None = None,
+    ) -> None:
         super().__init__(model_name=model_name, dimension=dimension)
+        self._st = sentence_transformer  # injected fake, or None -> lazy-load
 
     def embed(self, texts: Sequence[str]) -> list[list[float]]:
-        return [self._embed_one(text) for text in texts]
+        import numpy as np  # local import keeps the pure pipeline module light
 
-    def embed_query(self, query: str) -> list[float]:
-        return self._embed_one(query)
+        out = self._model().encode(list(texts), normalize_embeddings=True)
+        vectors = np.atleast_2d(out).tolist()
+        result = [[float(v) for v in row] for row in vectors]
+        for vector in result:
+            if len(vector) != self.dimension:
+                raise EmbeddingProviderError(
+                    f"model output dimension {len(vector)} != configured {self.dimension}"
+                )
+        return result
 
-    def _embed_one(self, text: str) -> list[float]:
-        vector = [0.0] * self.dimension
-        for token, count in _token_counts(text).items():
-            bucket = _stable_int(f"b:{token}") % self.dimension
-            sign = 1.0 if (_stable_int(f"s:{token}") & 1) == 0 else -1.0
-            vector[bucket] += sign * count
-        return _l2_normalize(vector)
+    def _model(self) -> Any:
+        if self._st is None:
+            from sentence_transformers import SentenceTransformer
+
+            self._st = SentenceTransformer(self.model_name)
+        return self._st
 
 
 class HttpEmbeddingProvider(EmbeddingProvider):
@@ -167,9 +178,6 @@ class HttpEmbeddingProvider(EmbeddingProvider):
                 )
         return vectors
 
-    def embed_query(self, query: str) -> list[float]:
-        return self.embed([query])[0]
-
 
 def build_embedding_provider(
     *,
@@ -185,34 +193,12 @@ def build_embedding_provider(
     is the one wiring point, fed by Settings (config.py).
     """
     if provider == "local":
-        return LocalHashEmbedder(dimension=dimension, model_name=model)
+        return SentenceTransformerEmbedder(model_name=model, dimension=dimension)
     if provider == "http":
         if not http_url:
             raise ValueError("EMBEDDING_HTTP_URL is required when EMBEDDING_PROVIDER=http")
         return HttpEmbeddingProvider(http_url, model=model, dimension=dimension, api_key=http_api_key)
     raise ValueError(f"unknown embedding provider {provider!r} (expected 'local' or 'http')")
-
-
-def _token_counts(text: str) -> dict[str, int]:
-    """Lowercased word frequencies; single characters are noise and dropped."""
-    counts: dict[str, int] = {}
-    for token in re.findall(r"[a-z0-9]+", text.lower()):
-        if len(token) < 2:
-            continue
-        counts[token] = counts.get(token, 0) + 1
-    return counts
-
-
-def _stable_int(key: str) -> int:
-    """A stable integer from a key (md5 is process-stable, unlike builtin hash)."""
-    return int.from_bytes(hashlib.md5(key.encode("utf-8")).digest(), "big")
-
-
-def _l2_normalize(vector: list[float]) -> list[float]:
-    norm = math.sqrt(sum(v * v for v in vector))
-    if norm == 0.0:
-        return vector
-    return [v / norm for v in vector]
 
 
 @dataclass(frozen=True)

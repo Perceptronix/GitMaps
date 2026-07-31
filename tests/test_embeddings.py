@@ -20,7 +20,7 @@ from gitmaps.embeddings import (
     EmbeddingProviderError,
     EmbeddingRunner,
     HttpEmbeddingProvider,
-    LocalHashEmbedder,
+    SentenceTransformerEmbedder,
     build_embedding_provider,
     compose_semantic_text,
     embedding_row_to_input,
@@ -138,44 +138,88 @@ def test_fingerprint_stable_and_sensitive() -> None:
     assert semantic_fingerprint(text) != semantic_fingerprint(text + "!")
 
 
-# -- Seam 1: LocalHashEmbedder ---------------------------------------------
+# -- Seam 1: SentenceTransformerEmbedder (injected fake model) ---------------
 
 
-def test_local_embedder_is_deterministic_and_normalized() -> None:
-    emb = LocalHashEmbedder(dimension=16, model_name="test")
-    v1 = emb.embed(["machine learning is great"])
-    v2 = emb.embed(["machine learning is great"])
-    assert v1 == v2
-    assert len(v1[0]) == 16
-    norm = math.sqrt(sum(x * x for x in v1[0]))
+class FakeSentenceModel:
+    """Duck-typed SentenceTransformer: returns normalized one-hot-ish vectors."""
+
+    def __init__(self, dim: int = 384) -> None:
+        self.dim = dim
+        self.calls: list[list[str]] = []
+
+    def encode(self, texts, normalize_embeddings: bool = True) -> object:
+        self.calls.append(list(texts))
+        component = 1.0 / math.sqrt(self.dim)
+        return [[component] * self.dim for _ in texts]
+
+
+def st_embedder(dim: int = 384, **kwargs) -> tuple[SentenceTransformerEmbedder, FakeSentenceModel]:
+    model = FakeSentenceModel(dim=dim)
+    return SentenceTransformerEmbedder(dimension=dim, sentence_transformer=model, **kwargs), model
+
+
+def test_st_embedder_encodes_through_injected_model() -> None:
+    emb, model = st_embedder(dim=16)
+
+    vectors = emb.embed(["machine learning is great"])
+
+    assert model.calls == [["machine learning is great"]]
+    assert len(vectors) == 1 and len(vectors[0]) == 16
+    assert all(isinstance(v, float) for v in vectors[0])
+
+
+def test_st_embedder_normalizes_vectors() -> None:
+    emb, _ = st_embedder(dim=16)
+
+    vectors = emb.embed(["machine learning is great"])
+
+    norm = math.sqrt(sum(x * x for x in vectors[0]))
     assert abs(norm - 1.0) < 1e-9
 
 
-def test_local_embedder_distinguishes_different_text() -> None:
-    emb = LocalHashEmbedder(dimension=64)
-    a = emb.embed(["web framework for javascript"])
-    b = emb.embed(["deep learning in rust"])
-    assert a[0] != b[0]
+def test_st_embedder_batches_multiple_texts() -> None:
+    emb, model = st_embedder(dim=8)
+
+    vectors = emb.embed(["one", "two", "three"])
+
+    assert model.calls == [["one", "two", "three"]]
+    assert len(vectors) == 3
 
 
-def test_local_embedder_empty_text_is_zero_vector() -> None:
-    emb = LocalHashEmbedder(dimension=8)
-    assert emb.embed([""]) == [[0.0] * 8]
-
-
-def test_local_embedder_query_matches_embed() -> None:
-    emb = LocalHashEmbedder(dimension=16)
+def test_st_embedder_query_matches_embed() -> None:
+    emb, _ = st_embedder(dim=16)
     assert emb.embed_query("hello world") == emb.embed(["hello world"])[0]
 
 
-def test_local_embedder_reports_version() -> None:
-    emb = LocalHashEmbedder(dimension=8, model_name="m")
+def test_st_embedder_reports_version() -> None:
+    emb, _ = st_embedder(dim=8, model_name="m")
     assert emb.embedding_model_version == "m:8"
 
 
-def test_local_embedder_rejects_bad_dimension() -> None:
+def test_st_embedder_rejects_bad_dimension() -> None:
     with pytest.raises(ValueError):
-        LocalHashEmbedder(dimension=0)
+        SentenceTransformerEmbedder(dimension=0)
+
+
+def test_st_embedder_validates_model_output_dimension() -> None:
+    # Configured for 32-d but the (fake) model emits 16-d -> loud failure.
+    emb = SentenceTransformerEmbedder(dimension=32, sentence_transformer=FakeSentenceModel(dim=16))
+
+    with pytest.raises(EmbeddingProviderError):
+        emb.embed(["x"])
+
+
+def test_st_embedder_lazy_loads_model_on_first_embed(monkeypatch) -> None:
+    emb = SentenceTransformerEmbedder(model_name="fake/model", dimension=8)
+    assert emb._st is None  # nothing loaded at construction
+
+    fake = FakeSentenceModel(dim=8)
+    monkeypatch.setattr("sentence_transformers.SentenceTransformer", lambda name: fake)
+
+    emb.embed(["hello"])
+
+    assert emb._st is fake  # loaded once, cached on the provider
 
 
 # -- Seam 1: HttpEmbeddingProvider (the cloud swap-in) ----------------------
@@ -253,7 +297,7 @@ def test_http_provider_raises_on_http_error() -> None:
 
 def test_build_local_provider() -> None:
     provider = build_embedding_provider(provider="local", model="m", dimension=8)
-    assert isinstance(provider, LocalHashEmbedder)
+    assert isinstance(provider, SentenceTransformerEmbedder)
     assert provider.model_name == "m"
     assert provider.dimension == 8
 
@@ -274,7 +318,8 @@ def test_build_unknown_provider_raises() -> None:
 
 
 def test_default_model_constant_is_the_local_default() -> None:
-    assert DEFAULT_MODEL == "local-hash-v1"
+    assert DEFAULT_MODEL == "sentence-transformers/all-MiniLM-L6-v2"
+    assert DEFAULT_MODEL.endswith("all-MiniLM-L6-v2")
 
 
 # -- Seam 2: EmbeddingRunner over FakeStore ---------------------------------

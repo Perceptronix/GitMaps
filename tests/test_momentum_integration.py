@@ -136,9 +136,10 @@ def test_momentum_engine_scores_against_supabase_and_rolls_back(live_db: Db) -> 
     assert store.get_state("momentum.last_run_at") == STAMP
     assert int(store.get_state("momentum.last_count")) >= 1
 
-    # Roll back: nothing persists.
+    # Roll back: this run's write must not persist (the DB may hold committed
+    # state from an earlier live run, so only our STAMP write is checked).
     db.rollback()
-    assert store.get_state("momentum.last_run_at") is None
+    assert store.get_state("momentum.last_run_at") != STAMP
     cur = db.execute("SELECT count(*) FROM momentum_scores WHERE repo_id = %s", (FIXTURE_REPO_ID,))
     assert cur.fetchone()[0] == 0
     cur = db.execute("SELECT count(*) FROM repos WHERE id = %s", (FIXTURE_REPO_ID,))

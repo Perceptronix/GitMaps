@@ -113,7 +113,7 @@ def test_embedding_defaults_when_unset() -> None:
     settings = Settings.from_env(base_env())
 
     assert settings.embedding_provider == "local"
-    assert settings.embedding_model == "local-hash-v1"
+    assert settings.embedding_model == "sentence-transformers/all-MiniLM-L6-v2"
     assert settings.embedding_dimension == 384
     assert settings.embedding_http_url is None
     assert settings.embedding_http_api_key is None
