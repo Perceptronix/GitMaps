@@ -23,6 +23,8 @@ INSERT INTO repos (
     %(watchers)s, %(open_issues)s
 )
 ON CONFLICT (id) DO UPDATE SET
+    owner      = EXCLUDED.owner,
+    name       = EXCLUDED.name,
     full_name  = EXCLUDED.full_name,
     description = EXCLUDED.description,
     topics     = EXCLUDED.topics,
@@ -43,6 +45,39 @@ STATE_UPSERT_SQL = """
 INSERT INTO ingestion_state (key, value, updated_at)
 VALUES (%s, %s, now())
 ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+"""
+
+INSERT_SNAPSHOT_SQL = """
+INSERT INTO snapshots (
+    repo_id, taken_at, kind, stars, forks, watchers, open_issues,
+    contributors, commit_activity
+) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (repo_id, taken_at, kind) DO NOTHING
+"""
+
+TOUCH_SNAPSHOT_SQL = """
+UPDATE repos SET
+    last_snapshot_at = now(),
+    first_snapshot_at = COALESCE(first_snapshot_at, now())
+WHERE id = %s
+"""
+
+DUE_CORE_SQL = """
+SELECT r.id, r.owner, r.name FROM repos r
+WHERE r.tracked AND (r.last_snapshot_at IS NULL OR r.last_snapshot_at < %s)
+ORDER BY r.last_snapshot_at NULLS FIRST, r.id
+LIMIT %s
+"""
+
+DUE_DEEP_SQL = """
+SELECT r.id, r.owner, r.name FROM repos r
+LEFT JOIN LATERAL (
+    SELECT max(s.taken_at) AS last_deep FROM snapshots s
+    WHERE s.repo_id = r.id AND s.kind = 'deep'
+) d ON true
+WHERE r.tracked AND (d.last_deep IS NULL OR d.last_deep < %s)
+ORDER BY d.last_deep NULLS FIRST, r.id
+LIMIT %s
 """
 
 
@@ -107,3 +142,45 @@ class RepoStore:
 
     def set_state(self, key: str, value: Any) -> None:
         self._db.execute(STATE_UPSERT_SQL, (key, json.dumps(value)))
+
+    # -- snapshot pipeline (architecture §5) -------------------------------
+
+    def list_due_repos(self, kind: str, cutoff: str, limit: int) -> list[tuple[int, str, str]]:
+        """Tracked repos due for a `kind` snapshot, oldest-first.
+
+        `cutoff` is a timestamp string; repos whose last snapshot of that kind
+        predates it (or have none) are due. The deep query uses a LATERAL to
+        read the per-kind last time, since `repos.last_snapshot_at` is shared.
+        """
+        if kind not in ("core", "deep"):
+            raise ValueError(f"kind must be 'core' or 'deep', got {kind!r}")
+        sql = DUE_CORE_SQL if kind == "core" else DUE_DEEP_SQL
+        cur = self._db.execute(sql, (cutoff, limit))
+        return [tuple(row) for row in cur.fetchall()]
+
+    def insert_snapshot(
+        self,
+        repo_id: int,
+        taken_at: str,
+        kind: str,
+        *,
+        stars: int | None = None,
+        forks: int | None = None,
+        watchers: int | None = None,
+        open_issues: int | None = None,
+        contributors: int | None = None,
+        commit_activity: Any = None,
+    ) -> int:
+        """Insert a snapshot row; idempotent via UNIQUE(repo_id, taken_at, kind)."""
+        commit_activity_json = json.dumps(commit_activity) if commit_activity is not None else None
+        return self._db.execute(
+            INSERT_SNAPSHOT_SQL,
+            (
+                repo_id, taken_at, kind, stars, forks, watchers, open_issues,
+                contributors, commit_activity_json,
+            ),
+        ).rowcount
+
+    def touch_snapshot_times(self, repo_id: int) -> None:
+        """Mark a repo as freshly snapshotted (sets first time on first snapshot)."""
+        self._db.execute(TOUCH_SNAPSHOT_SQL, (repo_id,))

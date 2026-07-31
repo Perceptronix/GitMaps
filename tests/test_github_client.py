@@ -62,13 +62,27 @@ def test_retries_on_server_error_with_backoff(caplog) -> None:
     session.responses.append(FakeResponse(status_code=502, json_body={}))
     session.responses.append(FakeResponse(json_body={"ok": True}))
     with caplog.at_level(logging.WARNING):
-        client = make_client(session, backoff_base=0.5, clock=clock.now, sleep=clock.sleep)
+        client = make_client(session, backoff_base=0.5, clock=clock.now, sleep=clock.sleep, rng=lambda: 0.5)
         body = client.get("/repos/octocat/hello-world")
 
     assert body == {"ok": True}
     assert len(session.calls) == 3
-    assert clock.sleeps == [0.5, 1.0]  # exponential backoff
+    assert clock.sleeps == [0.5, 1.0]  # exponential backoff (rng midpoint = no jitter shift)
     assert "Retrying" in caplog.text
+
+
+def test_backoff_applies_jitter() -> None:
+    clock = RecordingClock()
+    session = FakeSession()
+    session.responses.append(FakeResponse(status_code=502, json_body={}))
+    session.responses.append(FakeResponse(status_code=502, json_body={}))
+    session.responses.append(FakeResponse(json_body={"ok": True}))
+    rng = iter([0.0, 1.0]).__next__  # min jitter, then max jitter
+    client = make_client(session, backoff_base=1.0, jitter=0.5, clock=clock.now, sleep=clock.sleep, rng=rng)
+
+    client.get("/x")
+
+    assert clock.sleeps == [0.5, 3.0]  # 1*(1-0.5), then 2*(1+0.5)
 
 
 def test_retries_on_network_error() -> None:
@@ -76,7 +90,7 @@ def test_retries_on_network_error() -> None:
     session = FakeSession()
     session.raise_once = requests.ConnectionError("boom")
     session.responses.append(FakeResponse(json_body={"ok": True}))
-    client = make_client(session, clock=clock.now, sleep=clock.sleep)
+    client = make_client(session, clock=clock.now, sleep=clock.sleep, rng=lambda: 0.5)
 
     assert client.get("/ok") == {"ok": True}
     assert len(session.calls) == 2

@@ -20,6 +20,7 @@ Design notes
 from __future__ import annotations
 
 import logging
+import random
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Iterator
@@ -76,8 +77,10 @@ class GitHubClient:
         backoff_base: float = 0.5,
         retry_on: tuple[int, ...] = DEFAULT_RETRY_ON,
         rate_limit_buffer: float = 5.0,
+        jitter: float = 0.1,
         clock: Callable[[], float] | None = None,
         sleep: Callable[[float], None] | None = None,
+        rng: Callable[[], float] | None = None,
     ) -> None:
         if not tokens:
             raise ValueError("GitHubClient requires at least one token")
@@ -88,8 +91,10 @@ class GitHubClient:
         self._backoff_base = backoff_base
         self._retry_on = retry_on
         self._rate_limit_buffer = rate_limit_buffer
+        self._jitter = jitter
         self._clock = clock or time.time
         self._sleep = sleep or time.sleep
+        self._rng = rng or random.random
         self._next_index = 0
 
     # -- public API ---------------------------------------------------------
@@ -247,7 +252,12 @@ class GitHubClient:
             self._sleep(wait)
 
     def _backoff(self, attempt: int) -> float:
-        return self._backoff_base * (2 ** attempt)
+        delay = self._backoff_base * (2 ** attempt)
+        if self._jitter:
+            # ±jitter percent, so a thundering herd of workers doesn't retry
+            # in lockstep (architecture §6 "exponential jitter").
+            delay *= 1.0 + self._jitter * (self._rng() * 2.0 - 1.0)
+        return delay
 
     def _update_token(self, token: TokenState, resp: requests.Response) -> None:
         remaining = resp.headers.get("X-RateLimit-Remaining")

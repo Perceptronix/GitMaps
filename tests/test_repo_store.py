@@ -65,6 +65,17 @@ def test_upsert_returns_affected_rows() -> None:
     assert RepoStore(db).upsert(make_repo()) == 1
 
 
+def test_upsert_conflict_refreshes_owner_and_name_on_rename() -> None:
+    # Regression for the review finding: a renamed repository must update its
+    # owner/name too, not leave them stale while full_name changes.
+    db = FakeDb()
+    RepoStore(db).upsert(make_repo())
+
+    sql, _ = db.executed[-1]
+    assert "owner      = EXCLUDED.owner" in sql
+    assert "name       = EXCLUDED.name" in sql
+
+
 def test_upsert_many_batches_executemany() -> None:
     db = FakeDb()
     RepoStore(db).upsert_many([make_repo(), make_repo(id=1002)])
@@ -102,3 +113,67 @@ def test_get_state_missing_returns_none() -> None:
     db = FakeDb()
     db.fetchone_result = None
     assert RepoStore(db).get_state("nope") is None
+
+
+def test_list_due_repos_core_uses_cutoff_and_limit() -> None:
+    db = FakeDb()
+    db.fetchall_result = [(1001, "octocat", "hello-world")]
+    rows = RepoStore(db).list_due_repos("core", "2026-07-31T00:00:00Z", 100)
+
+    sql, params = db.executed[-1]
+    assert "FROM repos r" in sql and "tracked" in sql
+    assert params == ("2026-07-31T00:00:00Z", 100)
+    assert rows == [(1001, "octocat", "hello-world")]
+
+
+def test_list_due_repos_deep_uses_per_kind_lateral() -> None:
+    db = FakeDb()
+    db.fetchall_result = []
+    RepoStore(db).list_due_repos("deep", "2026-07-31T00:00:00Z", 50)
+
+    sql, params = db.executed[-1]
+    assert "LATERAL" in sql and "kind = 'deep'" in sql
+    assert params == ("2026-07-31T00:00:00Z", 50)
+
+
+def test_list_due_repos_rejects_unknown_kind() -> None:
+    db = FakeDb()
+    try:
+        RepoStore(db).list_due_repos("monthly", "2026-07-31T00:00:00Z", 10)
+        assert False, "expected ValueError"
+    except ValueError as exc:
+        assert "core" in str(exc) and "deep" in str(exc)
+
+
+def test_insert_snapshot_core_params() -> None:
+    db = FakeDb()
+    RepoStore(db).insert_snapshot(
+        1001, "2026-07-31T12:00:00Z", "core",
+        stars=42, forks=7, watchers=3, open_issues=2,
+    )
+
+    sql, params = db.executed[-1]
+    assert "ON CONFLICT (repo_id, taken_at, kind) DO NOTHING" in sql
+    assert params[:4] == (1001, "2026-07-31T12:00:00Z", "core", 42)
+    assert params[4:] == (7, 3, 2, None, None)  # deep fields absent
+
+
+def test_insert_snapshot_deep_encodes_commit_activity_json() -> None:
+    db = FakeDb()
+    weeks = [{"week": "2026-07-01", "total": 5}]
+    RepoStore(db).insert_snapshot(1001, "2026-07-31T12:00:00Z", "deep", contributors=12, commit_activity=weeks)
+
+    sql, params = db.executed[-1]
+    assert params[0] == 1001 and params[2] == "deep"
+    assert params[7] == 12
+    assert '"week"' in params[8]  # json-encoded commit_activity
+
+
+def test_touch_snapshot_times_sets_both_columns() -> None:
+    db = FakeDb()
+    RepoStore(db).touch_snapshot_times(1001)
+
+    sql, params = db.executed[-1]
+    assert "last_snapshot_at = now()" in sql
+    assert "first_snapshot_at = COALESCE(first_snapshot_at, now())" in sql
+    assert params == (1001,)
