@@ -14,16 +14,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
+from gitmaps.timeutil import utc_stamp
+
 SINCE_KEY = "discovery.since"
 LAST_RUN_KEY = "discovery.last_run_at"
 LAST_COUNT_KEY = "discovery.last_count"
 
 #: Default look-back when no watermark exists yet (first run).
 DEFAULT_WINDOW_DAYS = 7
-
-
-def _utc_stamp(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @dataclass(frozen=True)
@@ -52,8 +50,8 @@ class DiscoveryRunner:
         self._window_days = default_window_days
 
     def run(self) -> DiscoveryResult:
-        run_start = _utc_stamp(self._now())
-        since = self._store.get_state(SINCE_KEY) or _utc_stamp(
+        run_start = utc_stamp(self._now())
+        since = self._store.get_state(SINCE_KEY) or utc_stamp(
             self._now() - timedelta(days=self._window_days)
         )
         query = f"created:>={since}"

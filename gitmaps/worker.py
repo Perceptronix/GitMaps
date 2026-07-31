@@ -3,6 +3,8 @@
     python -m gitmaps.worker discover
     python -m gitmaps.worker snapshot_core
     python -m gitmaps.worker snapshot_deep
+    python -m gitmaps.worker promote
+    python -m gitmaps.worker momentum
 
 Every job runs inside a transaction that COMMITS on success and ROLLS BACK on
 failure (architecture D-10 single-writer, and the fix for the collector's
@@ -20,11 +22,12 @@ from gitmaps.collector import DiscoveryRunner
 from gitmaps.config import Settings
 from gitmaps.db import Db
 from gitmaps.github.client import GitHubClient
+from gitmaps.momentum import MomentumConfig, MomentumRunner
 from gitmaps.promotion import GateConfig, PromotionRunner
 from gitmaps.repo_store import RepoStore
 from gitmaps.snapshotter import SnapshotRunner
 
-JOBS = ("discover", "snapshot_core", "snapshot_deep", "promote")
+JOBS = ("discover", "snapshot_core", "snapshot_deep", "promote", "momentum")
 
 
 def run_job(job: str, settings: Settings, store: RepoStore, client_factory: Callable[[Settings], object]) -> str:
@@ -38,6 +41,14 @@ def run_job(job: str, settings: Settings, store: RepoStore, client_factory: Call
         return (
             f"promote: candidates={promo_result.candidates} tracked={promo_result.promoted_tracked} "
             f"surfaced={promo_result.promoted_surfaced}"
+        )
+    if job == "momentum":
+        momentum = MomentumRunner(
+            store, config=MomentumConfig(weights=settings.momentum_signal_weights)
+        ).run()
+        return (
+            f"momentum: repos={momentum.repos_scored} rows={momentum.rows_written} "
+            f"periods={'/'.join(momentum.periods)}"
         )
     runner = SnapshotRunner(client, store, budget_per_hour=settings.rate_budget_per_hour)
     if job == "snapshot_core":

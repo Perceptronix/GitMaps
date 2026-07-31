@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from gitmaps.config import DEFAULT_RATE_BUDGET_PER_HOUR, Settings
+from gitmaps.config import (
+    DEFAULT_RATE_BUDGET_PER_HOUR,
+    Settings,
+    parse_momentum_weights,
+)
+from gitmaps.momentum import DEFAULT_WEIGHTS
 
 
 def base_env() -> dict[str, str]:
@@ -61,3 +66,44 @@ def test_significance_threshold_default_and_override() -> None:
 def test_invalid_threshold_raises() -> None:
     with pytest.raises(ValueError, match="SIGNIFICANCE_THRESHOLD"):
         Settings.from_env({**base_env(), "SIGNIFICANCE_THRESHOLD": "high"})
+
+
+def test_momentum_weights_default_when_unset() -> None:
+    settings = Settings.from_env(base_env())
+
+    assert settings.momentum_signal_weights == DEFAULT_WEIGHTS
+    assert settings.momentum_signal_weights["stars"] == 0.35
+
+
+def test_momentum_weights_override() -> None:
+    raw = '{"stars":0.5,"forks":0.1,"watchers":0.1,"contributors":0.15,"commits":0.15}'
+    settings = Settings.from_env({**base_env(), "MOMENTUM_SIGNAL_WEIGHTS": raw})
+
+    assert settings.momentum_signal_weights["stars"] == 0.5
+    assert settings.momentum_signal_weights["commits"] == 0.15
+
+
+def test_momentum_weights_parse_validates_shape() -> None:
+    # Must be a JSON object covering exactly the five signals and summing to 1.
+    with pytest.raises(ValueError, match="JSON object"):
+        parse_momentum_weights("not-json")
+    with pytest.raises(ValueError, match="JSON object"):
+        parse_momentum_weights("[1, 2]")
+    with pytest.raises(ValueError, match="missing"):
+        parse_momentum_weights('{"stars": 1.0}')
+    with pytest.raises(ValueError, match="unknown"):
+        parse_momentum_weights(
+            '{"stars":0.2,"forks":0.2,"watchers":0.2,"contributors":0.2,"commits":0.2,"bogus":0.0}'
+        )
+    with pytest.raises(ValueError, match="numbers"):
+        parse_momentum_weights(
+            '{"stars":"lots","forks":0.2,"watchers":0.2,"contributors":0.2,"commits":0.2}'
+        )
+    with pytest.raises(ValueError, match="sum to 1.0"):
+        parse_momentum_weights(
+            '{"stars":1.0,"forks":0.15,"watchers":0.10,"contributors":0.20,"commits":0.20}'
+        )
+    with pytest.raises(ValueError, match="non-negative"):
+        parse_momentum_weights(
+            '{"stars":-0.1,"forks":0.35,"watchers":0.10,"contributors":0.35,"commits":0.30}'
+        )

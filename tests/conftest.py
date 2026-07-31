@@ -142,6 +142,9 @@ class FakeStore:
         due: list[tuple] | None = None,
         candidates: list[tuple] | None = None,
         tracked_not_surfaced: list[tuple] | None = None,
+        snapshot_repo_ids: list[int] | None = None,
+        momentum_snapshots: dict[int, list[tuple]] | None = None,
+        repo_created_at: dict[int, Any] | None = None,
     ) -> None:
         self.state: dict[str, Any] = dict(state or {})
         self.upserted: list[dict] = []
@@ -153,6 +156,14 @@ class FakeStore:
         self.tracked_not_surfaced: list[tuple] = list(tracked_not_surfaced or [])
         self.tracked_promotions: list[int] = []
         self.surfaced_promotions: list[tuple[int, str]] = []
+        # momentum pipeline
+        self.snapshot_repo_ids: list[int] = list(snapshot_repo_ids or [])
+        self.momentum_snapshots: dict[int, list[tuple]] = dict(momentum_snapshots or {})
+        self.repo_created_at: dict[int, Any] = dict(repo_created_at or {})
+        self.momentum_rows: list[dict] = []
+        self.repo_id_calls: list[tuple[int, int]] = []  # (limit, offset)
+        self.momentum_get_calls: list[tuple[int, str, str]] = []  # (repo_id, since, until)
+        self.rank_calls: list[tuple[str, str]] = []  # (period, computed_at)
 
     def upsert(self, repo: dict) -> int:
         self.upserted.append(repo)
@@ -192,6 +203,35 @@ class FakeStore:
     def promote_to_surfaced(self, repo_id: int, surfaced_at: str) -> int:
         self.surfaced_promotions.append((repo_id, surfaced_at))
         return 1
+
+    def list_snapshot_repo_ids(self, limit: int = 100, offset: int = 0) -> list[int]:
+        self.repo_id_calls.append((limit, offset))
+        return self.snapshot_repo_ids[offset:offset + limit]
+
+    def get_snapshots(self, repo_id: int, since: str, until: str) -> list[tuple]:
+        self.momentum_get_calls.append((repo_id, since, until))
+        return self.momentum_snapshots.get(repo_id, [])
+
+    def get_repo_created_at(self, repo_id: int) -> Any:
+        return self.repo_created_at.get(repo_id)
+
+    def upsert_momentum(
+        self,
+        repo_id: int,
+        period: str,
+        computed_at: str,
+        score: float,
+        decomposition: dict,
+        rank: int | None = None,
+    ) -> int:
+        self.momentum_rows.append(
+            {"repo_id": repo_id, "period": period, "computed_at": computed_at,
+             "score": score, "decomposition": decomposition, "rank": rank}
+        )
+        return 1
+
+    def rank_momentum(self, period: str, computed_at: str) -> None:
+        self.rank_calls.append((period, computed_at))
 
 
 def fixed_clock(epoch: float) -> tuple[Callable[[], float], list[float]]:

@@ -19,16 +19,13 @@ from typing import Callable
 
 from gitmaps.github.client import GitHubApiError, RateLimitError
 from gitmaps.repo_store import repo_to_row
+from gitmaps.timeutil import utc_stamp
 
 RATE_BUDGET_KEY = "rate_budget"
 
 #: A repo is "due" when its last snapshot of that kind predates this window.
 CORE_DUE_HOURS = 20
 DEEP_DUE_DAYS = 6
-
-
-def _utc_stamp(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _hour_stamp(dt: datetime) -> str:
@@ -66,18 +63,18 @@ class SnapshotRunner:
 
     def run_core(self) -> SnapshotResult:
         now = self._now()
-        cutoff = _utc_stamp(now - timedelta(hours=self._core_due_hours))
+        cutoff = utc_stamp(now - timedelta(hours=self._core_due_hours))
         return self._run("core", cutoff, now)
 
     def run_deep(self) -> SnapshotResult:
         now = self._now()
-        cutoff = _utc_stamp(now - timedelta(days=self._deep_due_days))
+        cutoff = utc_stamp(now - timedelta(days=self._deep_due_days))
         return self._run("deep", cutoff, now)
 
     # -- internals ---------------------------------------------------------
 
     def _run(self, kind: str, cutoff: str, now: datetime) -> SnapshotResult:
-        taken_at = _utc_stamp(now)
+        taken_at = utc_stamp(now)
         due = self._store.list_due_repos(kind, cutoff, self._batch_size)
 
         # Rolling per-hour rate budget (§6): read the current hour's counter;

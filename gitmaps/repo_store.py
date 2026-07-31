@@ -110,6 +110,50 @@ ORDER BY d.last_deep NULLS FIRST, r.id
 LIMIT %s
 """
 
+#: Snapshot row column order — must match the Momentum engine's column contract
+#: (_SLOT_* indexes in gitmaps/momentum.py).
+MOMENTUM_SNAPSHOT_COLUMNS = (
+    "taken_at, kind, stars, forks, watchers, open_issues, contributors, commit_activity"
+)
+
+MOMENTUM_LIST_REPO_IDS_SQL = """
+SELECT DISTINCT repo_id FROM snapshots
+ORDER BY repo_id
+LIMIT %s OFFSET %s
+"""
+
+MOMENTUM_GET_SNAPSHOTS_SQL = f"""
+SELECT {MOMENTUM_SNAPSHOT_COLUMNS} FROM snapshots
+WHERE repo_id = %s AND taken_at >= %s AND taken_at <= %s
+ORDER BY taken_at, id
+"""
+
+MOMENTUM_GET_CREATED_AT_SQL = """
+SELECT created_at FROM repos WHERE id = %s
+"""
+
+UPSERT_MOMENTUM_SQL = """
+INSERT INTO momentum_scores (repo_id, period, computed_at, score, decomposition, rank)
+VALUES (%s, %s, %s, %s, %s, %s)
+ON CONFLICT (repo_id, period, computed_at) DO UPDATE SET
+    score = EXCLUDED.score,
+    decomposition = EXCLUDED.decomposition,
+    rank = EXCLUDED.rank
+"""
+
+RANK_MOMENTUM_SQL = """
+UPDATE momentum_scores m
+SET rank = ranked.rn
+FROM (
+    SELECT repo_id, ROW_NUMBER() OVER (ORDER BY score DESC NULLS LAST) AS rn
+    FROM momentum_scores
+    WHERE period = %s AND computed_at = %s
+) ranked
+WHERE m.repo_id = ranked.repo_id
+  AND m.period = %s
+  AND m.computed_at = %s
+"""
+
 
 def repo_to_row(repo: dict) -> dict:
     """Map a GitHub REST repository object to a `repos` row.
@@ -234,3 +278,40 @@ class RepoStore:
     def promote_to_surfaced(self, repo_id: int, surfaced_at: str) -> int:
         """Promote a tracked repo to surfaced (records surfaced_at, once)."""
         return self._db.execute(PROMOTE_TO_SURFACED_SQL, (surfaced_at, repo_id)).rowcount
+
+    # -- momentum pipeline (architecture §5) ---------------------------------
+
+    def list_snapshot_repo_ids(self, limit: int = 100, offset: int = 0) -> list[int]:
+        """Repositories that have snapshots — the momentum universe, paged."""
+        cur = self._db.execute(MOMENTUM_LIST_REPO_IDS_SQL, (limit, offset))
+        return [row[0] for row in cur.fetchall()]
+
+    def get_snapshots(self, repo_id: int, since: str, until: str) -> list[tuple]:
+        """A repo's snapshot rows in `[since, until]`, oldest first (see MOMENTUM_SNAPSHOT_COLUMNS)."""
+        cur = self._db.execute(MOMENTUM_GET_SNAPSHOTS_SQL, (repo_id, since, until))
+        return [tuple(row) for row in cur.fetchall()]
+
+    def get_repo_created_at(self, repo_id: int) -> Any:
+        """Repo birth timestamp (the age signal for momentum)."""
+        cur = self._db.execute(MOMENTUM_GET_CREATED_AT_SQL, (repo_id,))
+        row = cur.fetchone()
+        return row[0] if row else None
+
+    def upsert_momentum(
+        self,
+        repo_id: int,
+        period: str,
+        computed_at: str,
+        score: float,
+        decomposition: dict,
+        rank: int | None = None,
+    ) -> int:
+        """Upsert one period's score + decomposition (replaces that computed_at's row)."""
+        return self._db.execute(
+            UPSERT_MOMENTUM_SQL,
+            (repo_id, period, computed_at, score, json.dumps(decomposition), rank),
+        ).rowcount
+
+    def rank_momentum(self, period: str, computed_at: str) -> None:
+        """Assign per-period ranks (ROW_NUMBER over score desc) for one computed_at."""
+        self._db.execute(RANK_MOMENTUM_SQL, (period, computed_at, period, computed_at))

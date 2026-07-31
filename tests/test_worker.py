@@ -75,6 +75,24 @@ def test_promote_job_commits_and_reports(capsys) -> None:
     assert "tracked=1 surfaced=1" in out.out
 
 
+def test_momentum_job_commits_and_reports(capsys) -> None:
+    db = FakeDb()
+    # One repo with snapshots (no rows fetched -> scores 0 for all periods),
+    # no birth date, and no other repos.
+    db.fetchall_by_substring = {
+        "SELECT DISTINCT repo_id FROM snapshots": [(1,)],
+        "SELECT taken_at, kind": [],
+    }
+    db.fetchone_result = (None,)  # created_at unknown
+
+    rc = main(["momentum"], settings=settings(), db=db, client_factory=lambda s: FakeClient())
+
+    out = capsys.readouterr()
+    assert rc == 0
+    assert db.commits == 1
+    assert "momentum: repos=1 rows=3 periods=1d/7d/30d" in out.out
+
+
 def test_unknown_job_prints_usage(capsys) -> None:
     rc = main(["bogus"])
 

@@ -219,3 +219,64 @@ def test_touch_snapshot_times_sets_both_columns() -> None:
     assert "last_snapshot_at = now()" in sql
     assert "first_snapshot_at = COALESCE(first_snapshot_at, now())" in sql
     assert params == (1001,)
+
+
+def test_list_snapshot_repo_ids_sql() -> None:
+    db = FakeDb()
+    db.fetchall_result = [(1001,), (1002,)]
+    repo_ids = RepoStore(db).list_snapshot_repo_ids(100, 50)
+
+    sql, params = db.executed[-1]
+    assert "SELECT DISTINCT repo_id FROM snapshots" in sql
+    assert "LIMIT %s OFFSET %s" in sql
+    assert params == (100, 50)
+    assert repo_ids == [1001, 1002]
+
+
+def test_get_snapshots_sql_and_rows() -> None:
+    db = FakeDb()
+    db.fetchall_result = [("2026-07-31T12:00:00Z", "core", 42, 7, 3, 2, None, None)]
+    rows = RepoStore(db).get_snapshots(1001, "2026-07-24T12:00:00Z", "2026-07-31T12:00:00Z")
+
+    sql, params = db.executed[-1]
+    assert "taken_at, kind, stars, forks, watchers, open_issues, contributors, commit_activity" in sql
+    assert params == (1001, "2026-07-24T12:00:00Z", "2026-07-31T12:00:00Z")
+    assert rows == [("2026-07-31T12:00:00Z", "core", 42, 7, 3, 2, None, None)]
+
+
+def test_get_repo_created_at_sql() -> None:
+    db = FakeDb()
+    db.fetchone_result = ("2026-07-01T10:00:00Z",)
+    assert RepoStore(db).get_repo_created_at(1001) == "2026-07-01T10:00:00Z"
+
+    sql, params = db.executed[-1]
+    assert "SELECT created_at FROM repos WHERE id = %s" in sql
+    assert params == (1001,)
+
+
+def test_get_repo_created_at_missing_returns_none() -> None:
+    db = FakeDb()
+    db.fetchone_result = None
+    assert RepoStore(db).get_repo_created_at(1001) is None
+
+
+def test_upsert_momentum_sql_and_params() -> None:
+    db = FakeDb()
+    RepoStore(db).upsert_momentum(1001, "7d", "2026-07-31T12:00:00Z", 0.4375, {"score": 0.4375}, rank=3)
+
+    sql, params = db.executed[-1]
+    assert "INSERT INTO momentum_scores" in sql
+    assert "ON CONFLICT (repo_id, period, computed_at) DO UPDATE" in sql
+    assert params[:4] == (1001, "7d", "2026-07-31T12:00:00Z", 0.4375)
+    assert '"score"' in params[4]  # decomposition json-encoded
+    assert params[5] == 3
+
+
+def test_rank_momentum_sql() -> None:
+    db = FakeDb()
+    RepoStore(db).rank_momentum("7d", "2026-07-31T12:00:00Z")
+
+    sql, params = db.executed[-1]
+    assert "ROW_NUMBER() OVER (ORDER BY score DESC NULLS LAST)" in sql
+    assert "UPDATE momentum_scores" in sql
+    assert params == ("7d", "2026-07-31T12:00:00Z", "7d", "2026-07-31T12:00:00Z")

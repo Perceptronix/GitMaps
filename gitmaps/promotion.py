@@ -22,23 +22,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable
 
-
-def _parse_ts(value: str | datetime | None) -> datetime | None:
-    # timestamptz columns come back from psycopg2 already parsed to datetime;
-    # the test fakes hand us strings. Accept both.
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value
-    return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-
-
-def _days_between(now: datetime, then: datetime | None) -> float:
-    return max((now - then).total_seconds() / 86400.0, 0.0) if then else 0.0
-
-
-def _utc_stamp(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+from gitmaps.timeutil import days_between, parse_ts, utc_stamp
 
 
 @dataclass(frozen=True)
@@ -105,10 +89,10 @@ def evaluate(repo: RepoSignals, config: GateConfig, now: datetime) -> Evaluation
     Each signal is normalized to [0, 1]; the score is the weighted sum, so the
     decomposition stored alongside it fully explains it (ADR-0002).
     """
-    created = _parse_ts(repo.created_at)
-    pushed = _parse_ts(repo.pushed_at)
-    age_days = _days_between(now, created)
-    since_push = _days_between(now, pushed)
+    created = parse_ts(repo.created_at)
+    pushed = parse_ts(repo.pushed_at)
+    age_days = days_between(now, created)
+    since_push = days_between(now, pushed)
 
     momentum = min(repo.stars / (age_days * config.momentum_target_per_day), 1.0) if created else 0.0
     recency = max(0.0, 1.0 - since_push / config.recency_window_days) if pushed else 0.0
@@ -182,7 +166,7 @@ class PromotionRunner:
 
     def run(self) -> PromotionResult:
         now = self._now()
-        now_stamp = _utc_stamp(now)
+        now_stamp = utc_stamp(now)
 
         promoted_tracked = 0
         promoted_surfaced = 0
