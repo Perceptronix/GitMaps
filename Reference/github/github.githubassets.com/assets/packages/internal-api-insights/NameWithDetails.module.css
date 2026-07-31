@@ -1,0 +1,42 @@
+@custom-media --viewportRange-landscape (orientation: landscape);
+@custom-media --viewportRange-narrow (max-width: calc(48rem - 0.02px));
+@custom-media --viewportRange-narrowLandscape ((max-width: calc(63.25rem - 0.02px)) and (max-height: calc(34rem - 0.02px)) and (orientation: landscape));
+@custom-media --viewportRange-portrait (orientation: portrait);
+@custom-media --viewportRange-regular (min-width: 48rem);
+@custom-media --viewportRange-wide (min-width: 87.5rem);
+.NameWithDetailsContainer {
+    display: flex;
+    flex-direction: row;
+    gap: var(--stack-gap-condensed);
+    align-items: center;
+}
+
+.NameWithDetailsTruncate {
+    margin-right: auto;
+    max-width: 100%;
+}
+
+.NameWithDetailsToken {
+    height: 2.3em;
+}
+
+.NameWithDetailsTokenSuccess {
+    color: var(--fgColor-success);
+}
+
+.NameWithDetailsTokenAttention {
+    color: var(--fgColor-attention);
+}
+
+.NameWithDetailsTokenDanger {
+    color: var(--fgColor-danger);
+}
+
+.NameWithDetailsTokenPadded {
+    height: 2.3em;
+    padding-right: var(--base-size-4);
+}
+
+.NameWithDetailsBoxFontMedium {
+    font-weight: var(--base-text-weight-medium);
+}

@@ -1,0 +1,24 @@
+@custom-media --viewportRange-landscape (orientation: landscape);
+@custom-media --viewportRange-narrow (max-width: calc(48rem - 0.02px));
+@custom-media --viewportRange-narrowLandscape ((max-width: calc(63.25rem - 0.02px)) and (max-height: calc(34rem - 0.02px)) and (orientation: landscape));
+@custom-media --viewportRange-portrait (orientation: portrait);
+@custom-media --viewportRange-regular (min-width: 48rem);
+@custom-media --viewportRange-wide (min-width: 87.5rem);
+.Heading {
+    display: flex;
+    flex-direction: column;
+    min-width: 100%;
+    min-height: 100%;
+    align-items: center;
+    justify-content: center;
+}
+
+.Status {
+    font-size: var(--text-title-size-large);
+    font-weight: var(--base-text-weight-semibold);
+}
+
+.Message {
+    font-size: var(--text-title-size-medium);
+    padding-top: var(--base-size-8);
+}

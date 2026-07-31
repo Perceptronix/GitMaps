@@ -1,0 +1,54 @@
+# ============================================================================
+# GitMaps — .gitignore
+# ============================================================================
+
+# --- Secrets: never commit these -------------------------------------------
+.env
+.env.*
+!.env.example
+*.env
+*.env.local
+*.env.production
+*.env.development
+
+# --- Node / Next.js ---------------------------------------------------------
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# --- Python -----------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# --- Supabase (local + generated) -------------------------------------------
+supabase/.temp/
+supabase/.branches/
+supabase/.storage/
+supabase/.cache/
+supabase/functions/.artifacts/
+
+# --- Claude Code local config --------------------------------------------------
+.claude/settings.local.json
+
+# --- Editor / OS -------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# --- Logs -------------------------------------------------------------------
+*.log
+npm-debug.log*

@@ -1,0 +1,48 @@
+import {addGitHubToTitle, setTitle} from '@github-ui/document-metadata'
+import type {Location} from '@github-ui/react-router'
+import {useEffect, useRef} from 'react'
+
+import type {PageError} from './app-routing-types'
+import type {RouteState} from './route-state'
+
+export const isHashNav = (current: Location | null, target: Location | null) => {
+  if (current === null || target === null) return false
+  return current.pathname === target.pathname && current.search === target.search && Boolean(target.hash)
+}
+
+export function useTitleManager(currentRouteState: RouteState | null, error: PageError | null, location: Location) {
+  const previousLocationRef = useRef<Location | null>(null)
+
+  useEffect(() => {
+    if (!previousLocationRef.current) {
+      previousLocationRef.current = location
+    }
+
+    if (!isHashNav(previousLocationRef.current, location) && (error || currentRouteState)) {
+      if (error) {
+        const errorTitle = getTitleForError(error)
+        setTitle(errorTitle)
+      } else if (currentRouteState?.type === 'loaded' && currentRouteState.title) {
+        // Some of our React applications manage their own title,
+        // so we only set the title if it's present in the payload
+        setTitle(addGitHubToTitle(currentRouteState.title))
+      }
+    }
+
+    if (previousLocationRef.current?.key !== location.key) {
+      previousLocationRef.current = location
+    }
+  }, [error, currentRouteState, location])
+}
+
+const getTitleForError = (error: PageError) => {
+  const innerTitle =
+    error.httpStatus === 404
+      ? '404 Page not found'
+      : error.httpStatus === 500
+        ? '500 Internal server error'
+        : error.httpStatus
+          ? `Error ${error.httpStatus}`
+          : 'Error'
+  return addGitHubToTitle(innerTitle)
+}

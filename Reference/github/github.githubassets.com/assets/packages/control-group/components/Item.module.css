@@ -1,0 +1,137 @@
+@custom-media --viewportRange-landscape (orientation: landscape);
+@custom-media --viewportRange-narrow (max-width: calc(48rem - 0.02px));
+@custom-media --viewportRange-narrowLandscape ((max-width: calc(63.25rem - 0.02px)) and (max-height: calc(34rem - 0.02px)) and (orientation: landscape));
+@custom-media --viewportRange-portrait (orientation: portrait);
+@custom-media --viewportRange-regular (min-width: 48rem);
+@custom-media --viewportRange-wide (min-width: 87.5rem);
+/* stylelint-disable primer/spacing */
+
+.container {
+    container-name: controlbox;
+    container-type: inline-size;
+    position: relative;
+    /* Setting horizontal padding in parent allows the child to render an inset (not full-width) dividing line border */
+    padding-right: var(--base-size-16);
+    padding-left: calc(var(--base-size-16) + (var(--base-size-16) * var(--nested-level)));
+    &.disabled {
+        background-color: var(--bgColor-disabled);
+    }
+    &:first-child {
+        border-top-left-radius: var(--borderRadius-medium);
+        border-top-right-radius: var(--borderRadius-medium);
+    }
+    &:last-child {
+        border-bottom-right-radius: var(--borderRadius-medium);
+        border-bottom-left-radius: var(--borderRadius-medium);
+    }
+    &:not(:first-child) .contents {
+        border-top: none;
+    }
+    &:not(:first-child)::before {
+        content: '';
+        display: block;
+        border-top: var(--borderWidth-thin) solid var(--borderColor-muted);
+        margin: 0 calc(-1 * var(--controlgroup_item-gap));
+    }
+}
+
+.link {
+    cursor: pointer;
+    &:hover {
+        background: var(--control-bgColor-hover);
+    }
+    &:focus-within {
+        outline: var(--focus-outline);
+    }
+}
+
+.linkWithoutControl .contents {
+    display: grid;
+    grid-template: 'leadingVisual title       title       blockControl trailingVisual' 1fr 'leadingVisual description description blockControl trailingVisual' auto / auto 1fr auto auto auto auto;
+}
+
+.contents {
+    display: grid;
+    grid-template: 'leadingVisual title       title       blockControl trailingVisual' 1fr 'leadingVisual description description blockControl trailingVisual' auto / auto 1fr auto auto auto auto;
+    padding: var(--controlgroup_item-gap) 0;
+    @container controlbox (max-width: 500px) {
+        grid-template: 'leadingVisual title        title        trailingVisual' 1fr 'leadingVisual description  description  trailingVisual' auto 'leadingVisual blockControl blockControl trailingVisual' auto / auto 1fr auto auto;
+    }
+}
+
+.leadingVisual {
+    grid-area: leadingVisual;
+    display: flex;
+    justify-content: center;
+    padding-right: var(--base-size-12);
+}
+
+.blockIcon {
+    align-self: center;
+}
+
+.leadingIcon {
+    display: flex;
+    padding: var(--base-size-8);
+    color: var(--fgColor-muted);
+    background-color: var(--bgColor-default);
+    border: var(--borderWidth-thin) solid;
+    border-color: var(--borderColor-default);
+    border-radius: var(--borderRadius-medium);
+}
+
+.title {
+    grid-area: title;
+    align-self: center;
+    margin-bottom: var(--base-size-2);
+}
+
+.description {
+    grid-area: description;
+}
+
+.blockControl {
+    grid-area: blockControl;
+    padding-left: var(--stack-gap-normal);
+    align-self: center;
+    @container controlbox (max-width: 500px) {
+        padding-top: var(--stack-gap-condensed);
+        padding-left: 0;
+    }
+}
+
+.trailingVisual {
+    grid-area: trailingVisual;
+    padding-left: var(--stack-gap-normal);
+    align-self: center;
+}
+
+/* Item link overlay: Uses inclusive component pattern (https://inclusive-components.design/cards/) */
+
+.itemLink {
+    text-decoration: none;
+    color: inherit;
+    &:hover {
+        text-decoration: none;
+    }
+    &::after {
+        position: absolute;
+        inset: 0;
+        content: '';
+    }
+    &:focus {
+        text-decoration: underline;
+        outline: none;
+    }
+    &:visited {
+        color: inherit;
+    }
+}
+
+.footer {
+    background-color: var(--bgColor-muted);
+    border-top: var(--borderWidth-thin) solid var(--borderColor-muted);
+    padding: var(--base-size-8) var(--controlgroup_item-gap);
+    border-bottom-right-radius: var(--borderRadius-medium);
+    border-bottom-left-radius: var(--borderRadius-medium);
+}

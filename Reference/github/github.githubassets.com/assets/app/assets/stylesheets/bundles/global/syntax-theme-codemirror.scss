@@ -1,0 +1,124 @@
+// stylelint-disable selector-max-type,selector-max-compound-selectors, selector-no-vendor-prefix
+// This is copied from https://github.com/primer/codemirror-github-light/blob/master/lib/codemirror-github-light-theme.css
+
+/*!
+ * GitHub Light v0.4.2
+ * Copyright (c) 2012 - 2017 GitHub, Inc.
+ * Licensed under MIT (https://github.com/primer/github-syntax-theme-generator/blob/master/LICENSE)
+ */
+
+.cm-s-github-light.CodeMirror {
+  color: var(--codeMirror-fgColor); // #24292e;
+  background: var(--codeMirror-bgColor); // #fff;
+}
+
+.cm-s-github-light .CodeMirror-gutters {
+  background: var(--codeMirror-gutters-bgColor); // #fff;
+  border-right-width: 0;
+}
+
+.cm-s-github-light .CodeMirror-guttermarker {
+  color: var(--codeMirror-gutterMarker-fgColor-default); // white;
+}
+
+.cm-s-github-light .CodeMirror-guttermarker-subtle {
+  color: var(--codeMirror-gutterMarker-fgColor-muted); // #d0d0d0; No match! But close to gray-3
+}
+
+.cm-s-github-light .CodeMirror-scrollbar-filler,
+.cm-s-github-light .CodeMirror-gutter-filler {
+  background-color: transparent;
+}
+
+.cm-s-github-light .CodeMirror-linenumber {
+  padding: 0 var(--base-size-16) 0 var(--base-size-16);
+  color: var(--codeMirror-lineNumber-fgColor); // #959da5;
+}
+
+.cm-s-github-light .CodeMirror-cursor {
+  // stylelint-disable-next-line primer/colors
+  border-left: var(--borderWidth-thin) solid var(--codeMirror-cursor-fgColor); // #24292e;
+}
+
+.cm-s-github-light.CodeMirror-focused .CodeMirror-selected,
+.cm-s-github-light .CodeMirror-line::selection,
+.cm-s-github-light .CodeMirror-line > span::selection,
+.cm-s-github-light .CodeMirror-line > span > span::selection {
+  // stylelint-disable-next-line primer/colors
+  background: var(--codeMirror-selection-bgColor, var(--color-codemirror-selection-bg, #d7d4f0)); // #c8c8fa
+}
+
+// Note: The ::-moz-selection selector needs to be used separatly otherwise the whole rule doesn't work.
+// For that reason the color (#c8c8fa) defined in the theme wasn't working in production
+// and the default selection color (#d7d4f0) from CodeMirror
+// https://github.com/codemirror/CodeMirror/blob/8bc57f76383e62e1a03c7d97c9eac74493fdbedc/lib/codemirror.css#L326
+// was used instead. So here we use the same #d7d4f0 to not cause any regression.
+
+.cm-s-github-light .CodeMirror-line > span::-moz-selection,
+.cm-s-github-light .CodeMirror-line > span > span::-moz-selection {
+  // stylelint-disable-next-line primer/colors
+  background: var(--codeMirror-selection-bgColor, var(--color-codemirror-selection-bg, #d7d4f0)); // #c8c8fa
+}
+
+.cm-s-github-light .CodeMirror-activeline-background {
+  background: var(--codeMirror-activeline-bgColor); // #fafbfc;
+}
+
+.cm-s-github-light .CodeMirror-matchingbracket {
+  color: var(--codeMirror-matchingBracket-fgColor) !important; // #24292e;
+  text-decoration: underline;
+}
+
+.cm-s-github-light .CodeMirror-lines {
+  font-family: var(--fontStack-monospace);
+  font-size: var(--text-body-size-small);
+  line-height: var(--text-body-lineHeight-medium);
+  background: var(--codeMirror-lines-bgColor); // #fff;
+}
+
+.cm-s-github-light .cm-comment {
+  color: var(--codeMirror-syntax-fgColor-comment); // #6a737d;
+}
+
+.cm-s-github-light .cm-constant {
+  color: var(--codeMirror-syntax-fgColor-constant); // #005cc5;
+}
+
+.cm-s-github-light .cm-entity {
+  font-style: normal;
+  font-weight: var(--base-text-weight-normal);
+  color: var(--codeMirror-syntax-fgColor-entity); // #6f42c1;
+  text-decoration: none;
+}
+
+.cm-s-github-light .cm-keyword {
+  font-style: normal;
+  font-weight: var(--base-text-weight-normal);
+  color: var(--codeMirror-syntax-fgColor-keyword); // #d73a49;
+  text-decoration: none;
+}
+
+.cm-s-github-light .cm-storage {
+  color: var(--codeMirror-syntax-fgColor-storage); // #d73a49;
+}
+
+.cm-s-github-light .cm-string {
+  font-style: normal;
+  font-weight: var(--base-text-weight-normal);
+  color: var(--codeMirror-syntax-fgColor-string); // #032f62;
+  text-decoration: none;
+}
+
+.cm-s-github-light .cm-support {
+  font-style: normal;
+  font-weight: var(--base-text-weight-normal);
+  color: var(--codeMirror-syntax-fgColor-support); // #005cc5;
+  text-decoration: none;
+}
+
+.cm-s-github-light .cm-variable {
+  font-style: normal;
+  font-weight: var(--base-text-weight-normal);
+  color: var(--codeMirror-syntax-fgColor-variable); // #e36209;
+  text-decoration: none;
+}
