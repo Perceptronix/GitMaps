@@ -93,6 +93,25 @@ def test_momentum_job_commits_and_reports(capsys) -> None:
     assert "momentum: repos=1 rows=3 periods=1d/7d/30d" in out.out
 
 
+def test_embed_job_commits_and_reports(capsys) -> None:
+    db = FakeDb()
+    # No model version yet -> full pass (also exercises the rate-budget wiring,
+    # which reads an empty budget when no state is present).
+    db.fetchone_result = None
+    db.fetchall_by_substring = {
+        "WHERE r.surfaced": [
+            (1001, "octocat", "hello", "octocat/hello", "A demo repo", ["cli"], "Python", "https://x", None),
+        ]
+    }
+
+    rc = main(["embed"], settings=settings(), db=db, client_factory=lambda s: FakeClient())
+
+    out = capsys.readouterr()
+    assert rc == 0
+    assert db.commits == 1
+    assert "embed: seen=1 embedded=1 skipped=0 model=local-hash-v1:384" in out.out
+
+
 def test_unknown_job_prints_usage(capsys) -> None:
     rc = main(["bogus"])
 

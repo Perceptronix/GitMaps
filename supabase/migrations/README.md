@@ -17,6 +17,7 @@ Migrations are applied **in filename order**, which matches the ticket dependenc
 | 07 | `20260731060000_clusters_cluster_linkage.sql` | 07 | `clusters` + `repos.cluster_id` FK (additive) |
 | 08 | `20260731070000_ingestion_state_job_budget.sql` | 08 | `ingestion_state` (key/value job/budget state) |
 | 09 | `20260731080000_schema_integration_verification.sql` | 09 | Verification gate — asserts all of the above exist; **runs last** |
+| 10 | `20260801000000_repos_embedding_tracking.sql` | 10 | `repos.embedding_fingerprint`, `repos.embedded_at` (additive, embedding incremental state) |
 
 ## Applying
 

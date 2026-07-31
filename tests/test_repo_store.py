@@ -7,7 +7,9 @@ FakeDb records the SQL + params.
 
 from __future__ import annotations
 
-from gitmaps.repo_store import RepoStore, repo_to_row
+import pytest
+
+from gitmaps.repo_store import RepoStore, embedding_queries, repo_to_row, vector_to_pgvector
 
 from conftest import FakeDb, make_repo
 
@@ -280,3 +282,64 @@ def test_rank_momentum_sql() -> None:
     assert "ROW_NUMBER() OVER (ORDER BY score DESC NULLS LAST)" in sql
     assert "UPDATE momentum_scores" in sql
     assert params == ("7d", "2026-07-31T12:00:00Z", "7d", "2026-07-31T12:00:00Z")
+
+
+def test_list_due_for_embedding_sql_surfaced() -> None:
+    db = FakeDb()
+    db.fetchall_result = [(1, "octocat", "hello", "octocat/hello", "d", ["python"], "Python", "https://x", None)]
+    rows = RepoStore(db).list_due_for_embedding("surfaced", 100, 0)
+
+    sql, params = db.executed[-1]
+    assert "r.embedding IS NULL OR r.embedded_at IS NULL OR r.embedded_at < r.pushed_at" in sql
+    assert "AND r.surfaced" in sql
+    assert params == (100, 0)
+    assert rows[0][0] == 1 and rows[0][8] is None
+
+
+def test_list_all_for_embedding_sql_surfaced() -> None:
+    db = FakeDb()
+    db.fetchall_result = []
+    RepoStore(db).list_all_for_embedding("surfaced", 50, 10)
+
+    sql, params = db.executed[-1]
+    assert "WHERE r.surfaced" in sql
+    assert "r.embedding IS NULL" not in sql  # full pass: no due filter
+    assert params == (50, 10)
+
+
+def test_list_due_for_embedding_universe_all_omits_surfaced_filter() -> None:
+    db = FakeDb()
+    db.fetchall_result = []
+    RepoStore(db).list_due_for_embedding("all", 100, 0)
+
+    sql, _ = db.executed[-1]
+    assert "surfaced" not in sql
+
+
+def test_embedding_queries_reject_unknown_universe() -> None:
+    with pytest.raises(ValueError):
+        embedding_queries("wat")
+
+
+def test_store_embedding_formats_vector_and_params() -> None:
+    db = FakeDb()
+    RepoStore(db).store_embedding(1001, [0.1, 0.25, -0.5], "abc123", "2026-07-31T12:00:00Z")
+
+    sql, params = db.executed[-1]
+    assert "embedding = %s::vector" in sql
+    assert params == ("[0.1,0.25,-0.5]", "abc123", "2026-07-31T12:00:00Z", 1001)
+
+
+def test_touch_embedded_at_sql() -> None:
+    db = FakeDb()
+    RepoStore(db).touch_embedded_at(1001, "2026-07-31T12:00:00Z")
+
+    sql, params = db.executed[-1]
+    assert "SET embedded_at = %s" in sql
+    assert params == ("2026-07-31T12:00:00Z", 1001)
+
+
+def test_vector_to_pgvector_formatting() -> None:
+    assert vector_to_pgvector([0.0, 1.0]) == "[0.0,1.0]"
+    assert vector_to_pgvector([0.1, 0.25, -0.5]) == "[0.1,0.25,-0.5]"
+    assert vector_to_pgvector([]) == "[]"

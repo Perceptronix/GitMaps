@@ -200,3 +200,46 @@ def test_search_stops_at_total_count() -> None:
 
     assert len(results) == 2
     assert len(session.calls) == 2
+
+
+def test_get_readme_returns_raw_text() -> None:
+    session = FakeSession()
+    session.responses.append(FakeResponse(text="# Hello"))
+    client = make_client(session)
+
+    assert client.get_readme("octocat", "hello-world") == "# Hello"
+
+    _, url, _, headers = session.calls[0]
+    assert url.endswith("/repos/octocat/hello-world/readme")
+    assert headers["Accept"] == "application/vnd.github.raw"
+
+
+def test_get_readme_404_returns_none() -> None:
+    session = FakeSession()
+    session.responses.append(FakeResponse(status_code=404, json_body={"message": "Not Found"}))
+    client = make_client(session)
+
+    assert client.get_readme("octocat", "no-readme") is None
+    assert len(session.calls) == 1  # a 404 is not retried
+
+
+def test_get_readme_propagates_other_errors() -> None:
+    session = FakeSession()
+    session.responses.append(FakeResponse(status_code=422, json_body={"message": "nope"}))
+    client = make_client(session)
+
+    with pytest.raises(GitHubApiError) as excinfo:
+        client.get_readme("octocat", "bad")
+
+    assert excinfo.value.status_code == 422
+
+
+def test_git_hub_api_error_carries_status_code() -> None:
+    session = FakeSession()
+    session.responses.append(FakeResponse(status_code=403, json_body={"message": "blocked"}))
+    client = make_client(session)
+
+    with pytest.raises(GitHubApiError) as excinfo:
+        client.get("/blocked")
+
+    assert excinfo.value.status_code == 403

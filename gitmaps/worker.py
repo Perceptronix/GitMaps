@@ -5,6 +5,7 @@
     python -m gitmaps.worker snapshot_deep
     python -m gitmaps.worker promote
     python -m gitmaps.worker momentum
+    python -m gitmaps.worker embed
 
 Every job runs inside a transaction that COMMITS on success and ROLLS BACK on
 failure (architecture D-10 single-writer, and the fix for the collector's
@@ -21,13 +22,14 @@ from typing import Callable, Sequence
 from gitmaps.collector import DiscoveryRunner
 from gitmaps.config import Settings
 from gitmaps.db import Db
+from gitmaps.embeddings import EmbeddingRunner, build_embedding_provider
 from gitmaps.github.client import GitHubClient
 from gitmaps.momentum import MomentumConfig, MomentumRunner
 from gitmaps.promotion import GateConfig, PromotionRunner
 from gitmaps.repo_store import RepoStore
 from gitmaps.snapshotter import SnapshotRunner
 
-JOBS = ("discover", "snapshot_core", "snapshot_deep", "promote", "momentum")
+JOBS = ("discover", "snapshot_core", "snapshot_deep", "promote", "momentum", "embed")
 
 
 def run_job(job: str, settings: Settings, store: RepoStore, client_factory: Callable[[Settings], object]) -> str:
@@ -49,6 +51,22 @@ def run_job(job: str, settings: Settings, store: RepoStore, client_factory: Call
         return (
             f"momentum: repos={momentum.repos_scored} rows={momentum.rows_written} "
             f"periods={'/'.join(momentum.periods)}"
+        )
+    if job == "embed":
+        provider = build_embedding_provider(
+            provider=settings.embedding_provider,
+            model=settings.embedding_model,
+            dimension=settings.embedding_dimension,
+            http_url=settings.embedding_http_url,
+            http_api_key=settings.embedding_http_api_key,
+        )
+        embedding_result = EmbeddingRunner(
+            client, store, provider=provider, budget_per_hour=settings.rate_budget_per_hour
+        ).run()
+        return (
+            f"embed: seen={embedding_result.repos_seen} "
+            f"embedded={embedding_result.embedded} "
+            f"skipped={embedding_result.skipped} model={embedding_result.model_version}"
         )
     runner = SnapshotRunner(client, store, budget_per_hour=settings.rate_budget_per_hour)
     if job == "snapshot_core":

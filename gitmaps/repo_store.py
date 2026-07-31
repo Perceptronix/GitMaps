@@ -154,6 +154,42 @@ WHERE m.repo_id = ranked.repo_id
   AND m.computed_at = %s
 """
 
+#: Embedding SELECT column order — must match `embedding_row_to_input` in
+#: gitmaps/embeddings.py.
+EMBEDDING_COLUMNS = (
+    "r.id, r.owner, r.name, r.full_name, r.description, r.topics, "
+    "r.language, r.homepage, r.embedding_fingerprint"
+)
+
+#: A repo is due when it has never been embedded, or its content may have
+#: changed since last embed (embedded_at < pushed_at). {universe} is a
+#: validated "AND r.surfaced" (surfaced-only) or "" (all repos) fragment.
+EMBEDDING_DUE_SQL_TMPL = f"""
+SELECT {EMBEDDING_COLUMNS} FROM repos r
+WHERE (r.embedding IS NULL OR r.embedded_at IS NULL OR r.embedded_at < r.pushed_at)
+{{universe}}
+ORDER BY r.id
+LIMIT %s OFFSET %s
+"""
+
+#: Full re-embed pass (model change / first run): every repo in the universe.
+EMBEDDING_ALL_SQL_TMPL = f"""
+SELECT {EMBEDDING_COLUMNS} FROM repos r
+{{where}}
+ORDER BY r.id
+LIMIT %s OFFSET %s
+"""
+
+UPDATE_EMBEDDING_SQL = """
+UPDATE repos SET
+    embedding = %s::vector,
+    embedding_fingerprint = %s,
+    embedded_at = %s
+WHERE id = %s
+"""
+
+TOUCH_EMBEDDED_SQL = "UPDATE repos SET embedded_at = %s WHERE id = %s"
+
 
 def repo_to_row(repo: dict) -> dict:
     """Map a GitHub REST repository object to a `repos` row.
@@ -186,6 +222,29 @@ def repo_to_row(repo: dict) -> dict:
         "watchers": repo.get("subscribers_count", 0),
         "open_issues": repo.get("open_issues_count", 0),
     }
+
+
+def embedding_queries(universe: str) -> tuple[str, str]:
+    """The (due, full) embedding SELECTs for a universe; validates the value.
+
+    `universe` is the only SQL-influencing input, and it is validated against
+    the two known values, so the fragment interpolation cannot inject SQL.
+    """
+    if universe == "surfaced":
+        universe_clause, where_clause = "AND r.surfaced", "WHERE r.surfaced"
+    elif universe == "all":
+        universe_clause, where_clause = "", ""
+    else:
+        raise ValueError(f"universe must be 'surfaced' or 'all', got {universe!r}")
+    return (
+        EMBEDDING_DUE_SQL_TMPL.format(universe=universe_clause),
+        EMBEDDING_ALL_SQL_TMPL.format(where=where_clause),
+    )
+
+
+def vector_to_pgvector(vector) -> str:
+    """Format a Python list of floats as a pgvector literal ("[1.0,2.0,...]")."""
+    return "[" + ",".join(str(float(v)) for v in vector) + "]"
 
 
 class RepoStore:
@@ -315,3 +374,28 @@ class RepoStore:
     def rank_momentum(self, period: str, computed_at: str) -> None:
         """Assign per-period ranks (ROW_NUMBER over score desc) for one computed_at."""
         self._db.execute(RANK_MOMENTUM_SQL, (period, computed_at, period, computed_at))
+
+    # -- embedding pipeline (architecture §7) --------------------------------
+
+    def list_due_for_embedding(self, universe: str = "surfaced", limit: int = 100, offset: int = 0) -> list[tuple]:
+        """Repos in the universe whose embedding is missing or possibly stale."""
+        due_sql, _ = embedding_queries(universe)
+        cur = self._db.execute(due_sql, (limit, offset))
+        return [tuple(row) for row in cur.fetchall()]
+
+    def list_all_for_embedding(self, universe: str = "surfaced", limit: int = 100, offset: int = 0) -> list[tuple]:
+        """Every repo in the universe — the full re-embed pass."""
+        _, full_sql = embedding_queries(universe)
+        cur = self._db.execute(full_sql, (limit, offset))
+        return [tuple(row) for row in cur.fetchall()]
+
+    def store_embedding(self, repo_id: int, vector, fingerprint: str, embedded_at: str) -> int:
+        """Write a repo's embedding + fingerprint + timestamp atomically (one UPDATE)."""
+        return self._db.execute(
+            UPDATE_EMBEDDING_SQL,
+            (vector_to_pgvector(vector), fingerprint, embedded_at, repo_id),
+        ).rowcount
+
+    def touch_embedded_at(self, repo_id: int, embedded_at: str) -> None:
+        """Advance embedded_at without re-embedding (content verified unchanged)."""
+        self._db.execute(TOUCH_EMBEDDED_SQL, (embedded_at, repo_id))

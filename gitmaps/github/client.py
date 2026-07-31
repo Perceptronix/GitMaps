@@ -38,6 +38,10 @@ MAX_SEARCH_RESULTS = 1000  # GitHub's hard cap on search pagination
 class GitHubApiError(RuntimeError):
     """A request failed after retries, or a non-retryable error status."""
 
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
 
 class RateLimitError(GitHubApiError):
     """The API rate limit was hit and could not be waited out."""
@@ -102,6 +106,26 @@ class GitHubClient:
     def get(self, path: str, *, params: dict[str, Any] | None = None, headers: dict[str, str] | None = None) -> Any:
         """GET a JSON resource, raising GitHubApiError on failure."""
         return self._request("GET", path, params=params, headers=headers).json()
+
+    def get_readme(self, owner: str, name: str) -> str | None:
+        """A repository's raw README text, or None when it has none (GitHub 404).
+
+        READMEs are the semantic layer's primary content source (architecture
+        §7); the embedding pipeline fetches them through this one method.
+        `Accept: application/vnd.github.raw` asks GitHub for the plain text,
+        not the base64-wrapped JSON object the endpoint returns by default.
+        """
+        try:
+            resp = self._request(
+                "GET",
+                f"/repos/{owner}/{name}/readme",
+                headers={"Accept": "application/vnd.github.raw"},
+            )
+        except GitHubApiError as exc:
+            if exc.status_code == 404:
+                return None
+            raise
+        return resp.text
 
     def paginate(self, path: str, *, per_page: int = 100, params: dict[str, Any] | None = None) -> Iterator[dict]:
         """Yield every item of a list endpoint, following Link rel=next."""
@@ -203,7 +227,10 @@ class GitHubClient:
                     self._sleep(delay)
                     attempt += 1
                     continue
-                raise RateLimitError(f"{method} {path} rate limit exceeded after {attempt + 1} attempts")
+                raise RateLimitError(
+                    f"{method} {path} rate limit exceeded after {attempt + 1} attempts",
+                    status_code=resp.status_code,
+                )
 
             if resp.status_code in self._retry_on:
                 if attempt < self._max_retries:
@@ -216,12 +243,16 @@ class GitHubClient:
                     attempt += 1
                     continue
                 raise GitHubApiError(
-                    f"{method} {path} failed: {resp.status_code} after {attempt + 1} attempts"
+                    f"{method} {path} failed: {resp.status_code} after {attempt + 1} attempts",
+                    status_code=resp.status_code,
                 )
 
             if resp.status_code >= 400:
                 message = self._error_message(resp)
-                raise GitHubApiError(f"{method} {path} failed: {resp.status_code} {message}")
+                raise GitHubApiError(
+                    f"{method} {path} failed: {resp.status_code} {message}",
+                    status_code=resp.status_code,
+                )
 
             return resp
 

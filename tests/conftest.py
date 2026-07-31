@@ -22,10 +22,12 @@ class FakeResponse:
         status_code: int = 200,
         json_body: Any = None,
         headers: dict[str, str] | None = None,
+        text: str = "",
     ) -> None:
         self.status_code = status_code
         self._json = json_body
         self.headers = headers or {}
+        self.text = text
 
     def json(self) -> Any:
         return self._json
@@ -100,9 +102,10 @@ class FakeDb:
 class FakeClient:
     """Dependency-injected client: scripted per-path GET responses + search items.
 
-    Mirrors the subset of GitHubClient the runners use: `search` (discovery)
-    and `get` (snapshot fetches). Pass `get_error` as a set of paths whose GET
-    should raise GitHubApiError.
+    Mirrors the subset of GitHubClient the runners use: `search` (discovery),
+    `get` (snapshot fetches), and `get_readme` (embedding). Pass `get_error`
+    as a set of paths whose GET/readme should raise GitHubApiError. A readme
+    path with no scripted response means "no README" (the real client's 404).
     """
 
     def __init__(
@@ -116,7 +119,7 @@ class FakeClient:
         self.responses = dict(responses or {})
         self.get_error = set(get_error or ())
         self.rate_limit = set(rate_limit or ())
-        self.calls: list[tuple[str, str]] = []  # ("search"|"get", path)
+        self.calls: list[tuple[str, str]] = []  # ("search"|"get"|"get_readme", path)
 
     def search(self, query: str, per_page: int = 100) -> Iterator[dict]:
         self.calls.append(("search", query))
@@ -132,6 +135,15 @@ class FakeClient:
             raise AssertionError(f"no scripted response for {path}")
         return self.responses[path]
 
+    def get_readme(self, owner: str, name: str) -> Any:
+        path = f"/repos/{owner}/{name}/readme"
+        self.calls.append(("get_readme", path))
+        if path in self.rate_limit:
+            raise RateLimitError(f"{path} rate limited")
+        if path in self.get_error:
+            raise GitHubApiError(f"{path} failed")
+        return self.responses.get(path)  # None = no README (GitHub 404)
+
 
 class FakeStore:
     """In-memory store: records upserts, snapshots, touches, and state."""
@@ -145,6 +157,8 @@ class FakeStore:
         snapshot_repo_ids: list[int] | None = None,
         momentum_snapshots: dict[int, list[tuple]] | None = None,
         repo_created_at: dict[int, Any] | None = None,
+        embedding_due: list[tuple] | None = None,
+        embedding_all: list[tuple] | None = None,
     ) -> None:
         self.state: dict[str, Any] = dict(state or {})
         self.upserted: list[dict] = []
@@ -164,6 +178,13 @@ class FakeStore:
         self.repo_id_calls: list[tuple[int, int]] = []  # (limit, offset)
         self.momentum_get_calls: list[tuple[int, str, str]] = []  # (repo_id, since, until)
         self.rank_calls: list[tuple[str, str]] = []  # (period, computed_at)
+        # embedding pipeline
+        self.embedding_due: list[tuple] = list(embedding_due or [])
+        self.embedding_all: list[tuple] = list(embedding_all or [])
+        self.embedding_due_calls: list[tuple[str, int, int]] = []  # (universe, limit, offset)
+        self.embedding_all_calls: list[tuple[str, int, int]] = []  # (universe, limit, offset)
+        self.embedding_stored: list[dict] = []
+        self.embedded_touched: list[tuple[int, str]] = []  # (repo_id, embedded_at)
 
     def upsert(self, repo: dict) -> int:
         self.upserted.append(repo)
@@ -232,6 +253,23 @@ class FakeStore:
 
     def rank_momentum(self, period: str, computed_at: str) -> None:
         self.rank_calls.append((period, computed_at))
+
+    def list_due_for_embedding(self, universe: str = "surfaced", limit: int = 100, offset: int = 0) -> list[tuple]:
+        self.embedding_due_calls.append((universe, limit, offset))
+        return self.embedding_due[offset:offset + limit]
+
+    def list_all_for_embedding(self, universe: str = "surfaced", limit: int = 100, offset: int = 0) -> list[tuple]:
+        self.embedding_all_calls.append((universe, limit, offset))
+        return self.embedding_all[offset:offset + limit]
+
+    def store_embedding(self, repo_id: int, vector, fingerprint: str, embedded_at: str) -> int:
+        self.embedding_stored.append(
+            {"repo_id": repo_id, "vector": vector, "fingerprint": fingerprint, "embedded_at": embedded_at}
+        )
+        return 1
+
+    def touch_embedded_at(self, repo_id: int, embedded_at: str) -> None:
+        self.embedded_touched.append((repo_id, embedded_at))
 
 
 def fixed_clock(epoch: float) -> tuple[Callable[[], float], list[float]]:
