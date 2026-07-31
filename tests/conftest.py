@@ -11,7 +11,7 @@ import time
 from types import SimpleNamespace
 from typing import Any, Callable, Iterator
 
-from gitmaps.github.client import GitHubApiError
+from gitmaps.github.client import GitHubApiError, RateLimitError
 
 
 class FakeResponse:
@@ -107,10 +107,12 @@ class FakeClient:
         repos: list[dict] | None = None,
         responses: dict[str, Any] | None = None,
         get_error: set[str] | None = None,
+        rate_limit: set[str] | None = None,
     ) -> None:
         self.repos = list(repos or [])
         self.responses = dict(responses or {})
         self.get_error = set(get_error or ())
+        self.rate_limit = set(rate_limit or ())
         self.calls: list[tuple[str, str]] = []  # ("search"|"get", path)
 
     def search(self, query: str, per_page: int = 100) -> Iterator[dict]:
@@ -119,6 +121,8 @@ class FakeClient:
 
     def get(self, path: str, *, params: dict | None = None, headers: dict | None = None) -> Any:
         self.calls.append(("get", path))
+        if path in self.rate_limit:
+            raise RateLimitError(f"{path} rate limited")
         if path in self.get_error:
             raise GitHubApiError(f"{path} failed")
         if path not in self.responses:

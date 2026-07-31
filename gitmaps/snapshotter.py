@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
-from gitmaps.github.client import GitHubApiError
+from gitmaps.github.client import GitHubApiError, RateLimitError
 from gitmaps.repo_store import repo_to_row
 
 RATE_BUDGET_KEY = "rate_budget"
@@ -93,18 +93,26 @@ class SnapshotRunner:
             if budget is not None and budget["used"] >= self._budget_per_hour:
                 rate_limited = True
                 break
+            # Charge the budget up front: a request is consumed whether it
+            # succeeds or fails, so failed/aborted calls still count (§6).
+            calls = 1 if kind == "core" else 2
+            if budget is not None:
+                budget["used"] += calls
             try:
                 if kind == "core":
-                    calls, n = 1, self._snapshot_core(repo_id, owner, name, taken_at)
+                    n = self._snapshot_core(repo_id, owner, name, taken_at)
                 else:
-                    calls, n = 2, self._snapshot_deep(repo_id, owner, name, taken_at)
+                    n = self._snapshot_deep(repo_id, owner, name, taken_at)
+            except RateLimitError:
+                # All tokens are exhausted — abort the batch rather than
+                # sleeping through the reset once per remaining repo.
+                rate_limited = True
+                break
             except GitHubApiError:
                 skipped += 1
                 continue
             attempted += 1
             inserted += n
-            if budget is not None:
-                budget["used"] += calls
 
         self._store.set_state(f"snapshot.{kind}.last_run_at", taken_at)
         self._store.set_state(f"snapshot.{kind}.last_count", inserted)

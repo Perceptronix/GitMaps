@@ -137,6 +137,44 @@ def test_rate_budget_already_spent_aborts_before_requests() -> None:
     assert client.calls == []  # no API request was made
 
 
+def test_rate_limit_error_aborts_batch() -> None:
+    # When every token is rate limited, the run must stop at the first repo
+    # rather than skip it and sleep through the reset for each remaining repo.
+    client = FakeClient(
+        responses={"/repos/acme/widget": make_repo(id=1002, name="widget")},
+        rate_limit={"/repos/octocat/hello-world"},
+    )
+    store = FakeStore(due=[(1001, "octocat", "hello-world"), (1002, "acme", "widget")])
+    runner, store = make_runner(client, store, budget_per_hour=10)
+
+    result = runner.run_core()
+
+    assert result.rate_limited
+    assert result.attempted == 0
+    assert result.skipped == 0
+    assert [c for c in client.calls if c[0] == "get"] == [("get", "/repos/octocat/hello-world")]
+    assert store.snapshots == []  # the second repo was never fetched
+    # the aborted repo's request still consumed budget
+    assert store.state["rate_budget"] == {"hour": HOUR, "used": 1}
+
+
+def test_failed_requests_consume_budget() -> None:
+    client = FakeClient(
+        responses={"/repos/acme/widget": make_repo(id=1002, name="widget")},
+        get_error={"/repos/octocat/hello-world"},
+    )
+    store = FakeStore(due=[(1001, "octocat", "hello-world"), (1002, "acme", "widget")])
+    runner, store = make_runner(client, store, budget_per_hour=10)
+
+    result = runner.run_core()
+
+    assert result.skipped == 1
+    assert result.attempted == 1
+    assert result.inserted == 1
+    # failed repo (1001) and successful repo (1002) each consumed one call
+    assert store.state["rate_budget"] == {"hour": HOUR, "used": 2}
+
+
 def test_rate_budget_rolls_over_to_new_hour() -> None:
     client = FakeClient(responses={"/repos/octocat/hello-world": make_repo()})
     store = FakeStore(state={"rate_budget": {"hour": "2026-07-31T11:00:00Z", "used": 999}}, due=[(1001, "octocat", "hello-world")])
