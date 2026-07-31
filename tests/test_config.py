@@ -51,3 +51,13 @@ def test_budget_override_and_invalid_value() -> None:
 
     with pytest.raises(ValueError, match="integer"):
         Settings.from_env({**base_env(), "GITHUB_API_BUDGET_PER_HOUR": "lots"})
+
+
+def test_significance_threshold_default_and_override() -> None:
+    assert Settings.from_env(base_env()).significance_threshold == 0.5
+    assert Settings.from_env({**base_env(), "SIGNIFICANCE_THRESHOLD": "0.7"}).significance_threshold == 0.7
+
+
+def test_invalid_threshold_raises() -> None:
+    with pytest.raises(ValueError, match="SIGNIFICANCE_THRESHOLD"):
+        Settings.from_env({**base_env(), "SIGNIFICANCE_THRESHOLD": "high"})

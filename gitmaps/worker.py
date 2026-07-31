@@ -20,10 +20,11 @@ from gitmaps.collector import DiscoveryRunner
 from gitmaps.config import Settings
 from gitmaps.db import Db
 from gitmaps.github.client import GitHubClient
+from gitmaps.promotion import GateConfig, PromotionRunner
 from gitmaps.repo_store import RepoStore
 from gitmaps.snapshotter import SnapshotRunner
 
-JOBS = ("discover", "snapshot_core", "snapshot_deep")
+JOBS = ("discover", "snapshot_core", "snapshot_deep", "promote")
 
 
 def run_job(job: str, settings: Settings, store: RepoStore, client_factory: Callable[[Settings], object]) -> str:
@@ -31,6 +32,13 @@ def run_job(job: str, settings: Settings, store: RepoStore, client_factory: Call
     if job == "discover":
         discovery = DiscoveryRunner(client, store).run()
         return f"discover: found={discovery.found} stored={discovery.stored} dropped={discovery.dropped}"
+    if job == "promote":
+        promoter = PromotionRunner(store, config=GateConfig(threshold=settings.significance_threshold))
+        promo_result = promoter.run()
+        return (
+            f"promote: candidates={promo_result.candidates} tracked={promo_result.promoted_tracked} "
+            f"surfaced={promo_result.promoted_surfaced}"
+        )
     runner = SnapshotRunner(client, store, budget_per_hour=settings.rate_budget_per_hour)
     if job == "snapshot_core":
         result = runner.run_core()

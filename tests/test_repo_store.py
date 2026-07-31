@@ -169,6 +169,48 @@ def test_insert_snapshot_deep_encodes_commit_activity_json() -> None:
     assert '"week"' in params[8]  # json-encoded commit_activity
 
 
+def test_list_candidates_sql_and_rows() -> None:
+    db = FakeDb()
+    db.fetchall_result = [(42, 80, 10, 3, "2026-01-01T00:00:00Z", "2026-07-30T00:00:00Z",
+                           "desc", "https://x", ["python"], False, False, None)]
+    rows = RepoStore(db).list_candidates(50)
+
+    sql, params = db.executed[-1]
+    assert "WHERE NOT tracked" in sql
+    assert params == (50,)
+    assert rows[0][0] == 42 and rows[0][8] == ["python"]
+
+
+def test_list_tracked_not_surfaced_sql() -> None:
+    db = FakeDb()
+    db.fetchall_result = []
+    RepoStore(db).list_tracked_not_surfaced(25)
+
+    sql, params = db.executed[-1]
+    assert "WHERE tracked AND NOT surfaced" in sql
+    assert params == (25,)
+
+
+def test_promote_to_tracked_sql() -> None:
+    db = FakeDb()
+    RepoStore(db).promote_to_tracked(42)
+
+    sql, params = db.executed[-1]
+    assert "SET tracked = true" in sql
+    assert "AND NOT tracked" in sql  # idempotent: no-op when already tracked
+    assert params == (42,)
+
+
+def test_promote_to_surfaced_sql() -> None:
+    db = FakeDb()
+    RepoStore(db).promote_to_surfaced(42, "2026-07-31T12:00:00Z")
+
+    sql, params = db.executed[-1]
+    assert "SET surfaced = true, surfaced_at = %s" in sql
+    assert "AND NOT surfaced" in sql
+    assert params == ("2026-07-31T12:00:00Z", 42)
+
+
 def test_touch_snapshot_times_sets_both_columns() -> None:
     db = FakeDb()
     RepoStore(db).touch_snapshot_times(1001)

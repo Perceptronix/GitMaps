@@ -6,6 +6,8 @@ full dispatch path (env-free, network-free, database-free) is exercised.
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from gitmaps.config import Settings
 from gitmaps.worker import main
 
@@ -45,6 +47,32 @@ def test_snapshot_core_job_commits_and_reports(capsys) -> None:
     assert rc == 0
     assert db.commits == 1
     assert "inserted=1" in out.out
+
+
+def _ago(days: int) -> str:
+    return (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _significant_candidate() -> tuple:
+    # PROMOTION_COLUMNS order: id, stars, forks, contributors, created_at,
+    # pushed_at, description, homepage, topics, tracked, surfaced, surfaced_at.
+    return (
+        7, 80, 10, 3, _ago(200), _ago(0),
+        "A focused CLI for reproducible data science.", None, ["python", "cli", "data"],
+        False, False, None,
+    )
+
+
+def test_promote_job_commits_and_reports(capsys) -> None:
+    db = FakeDb()
+    db.fetchall_by_substring = {"WHERE NOT tracked": [_significant_candidate()], "WHERE tracked": []}
+
+    rc = main(["promote"], settings=settings(), db=db, client_factory=lambda s: FakeClient())
+
+    out = capsys.readouterr()
+    assert rc == 0
+    assert db.commits == 1
+    assert "tracked=1 surfaced=1" in out.out
 
 
 def test_unknown_job_prints_usage(capsys) -> None:

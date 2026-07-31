@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 DEFAULT_RATE_BUDGET_PER_HOUR = 5000  # architecture §6
+DEFAULT_SIGNIFICANCE_THRESHOLD = 0.5  # the surface gate (architecture §4, ADR-0003)
 
 
 @dataclass(frozen=True)
@@ -18,6 +19,7 @@ class Settings:
     database_url: str
     github_tokens: tuple[str, ...]
     rate_budget_per_hour: int = DEFAULT_RATE_BUDGET_PER_HOUR
+    significance_threshold: float = DEFAULT_SIGNIFICANCE_THRESHOLD
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -36,4 +38,14 @@ class Settings:
         except ValueError as exc:
             raise ValueError("GITHUB_API_BUDGET_PER_HOUR must be an integer") from exc
 
-        return cls(database_url=database_url, github_tokens=tokens, rate_budget_per_hour=budget)
+        try:
+            threshold = float(env.get("SIGNIFICANCE_THRESHOLD", str(DEFAULT_SIGNIFICANCE_THRESHOLD)))
+        except ValueError as exc:
+            raise ValueError("SIGNIFICANCE_THRESHOLD must be a number") from exc
+
+        return cls(
+            database_url=database_url,
+            github_tokens=tokens,
+            rate_budget_per_hour=budget,
+            significance_threshold=threshold,
+        )

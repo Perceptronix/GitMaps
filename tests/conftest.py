@@ -56,16 +56,19 @@ class FakeDb:
         self.executed: list[tuple[str, Any]] = []
         self.fetchone_result: Any = None
         self.fetchall_result: list[Any] = []
+        # Optional per-query overrides: sql substring -> rows. First match wins.
+        self.fetchall_by_substring: dict[str, list[Any]] = {}
         self.commits = 0
         self.rollbacks = 0
         self.closed = False
 
     def _cursor(self, sql: str, params: Any, rowcount: int) -> SimpleNamespace:
         self.executed.append((sql, params))
+        rows = next((v for k, v in self.fetchall_by_substring.items() if k in sql), self.fetchall_result)
         return SimpleNamespace(
             rowcount=rowcount,
             fetchone=lambda: self.fetchone_result,
-            fetchall=lambda: self.fetchall_result,
+            fetchall=lambda: rows,
         )
 
     def execute(self, sql: str, params: Any = None) -> SimpleNamespace:
@@ -133,13 +136,23 @@ class FakeClient:
 class FakeStore:
     """In-memory store: records upserts, snapshots, touches, and state."""
 
-    def __init__(self, state: dict[str, Any] | None = None, due: list[tuple] | None = None) -> None:
+    def __init__(
+        self,
+        state: dict[str, Any] | None = None,
+        due: list[tuple] | None = None,
+        candidates: list[tuple] | None = None,
+        tracked_not_surfaced: list[tuple] | None = None,
+    ) -> None:
         self.state: dict[str, Any] = dict(state or {})
         self.upserted: list[dict] = []
         self.due: list[tuple] = list(due or [])
         self.due_calls: list[tuple[str, str, int]] = []
         self.snapshots: list[dict] = []
         self.touched: list[int] = []
+        self.candidates: list[tuple] = list(candidates or [])
+        self.tracked_not_surfaced: list[tuple] = list(tracked_not_surfaced or [])
+        self.tracked_promotions: list[int] = []
+        self.surfaced_promotions: list[tuple[int, str]] = []
 
     def upsert(self, repo: dict) -> int:
         self.upserted.append(repo)
@@ -165,6 +178,20 @@ class FakeStore:
 
     def touch_snapshot_times(self, repo_id: int) -> None:
         self.touched.append(repo_id)
+
+    def list_candidates(self, limit: int = 100) -> list[tuple]:
+        return self.candidates[:limit]
+
+    def list_tracked_not_surfaced(self, limit: int = 100) -> list[tuple]:
+        return self.tracked_not_surfaced[:limit]
+
+    def promote_to_tracked(self, repo_id: int) -> int:
+        self.tracked_promotions.append(repo_id)
+        return 1
+
+    def promote_to_surfaced(self, repo_id: int, surfaced_at: str) -> int:
+        self.surfaced_promotions.append((repo_id, surfaced_at))
+        return 1
 
 
 def fixed_clock(epoch: float) -> tuple[Callable[[], float], list[float]]:

@@ -69,6 +69,36 @@ ORDER BY r.last_snapshot_at NULLS FIRST, r.id
 LIMIT %s
 """
 
+#: Column order for candidate reads — must match `row_to_signals` in promotion.py.
+PROMOTION_COLUMNS = (
+    "id, stars, forks, contributors, created_at, pushed_at, "
+    "description, homepage, topics, tracked, surfaced, surfaced_at"
+)
+
+LIST_CANDIDATES_SQL = f"""
+SELECT {PROMOTION_COLUMNS} FROM repos
+WHERE NOT tracked
+ORDER BY id
+LIMIT %s
+"""
+
+LIST_TRACKED_NOT_SURFACED_SQL = f"""
+SELECT {PROMOTION_COLUMNS} FROM repos
+WHERE tracked AND NOT surfaced
+ORDER BY id
+LIMIT %s
+"""
+
+PROMOTE_TO_TRACKED_SQL = """
+UPDATE repos SET tracked = true
+WHERE id = %s AND NOT tracked
+"""
+
+PROMOTE_TO_SURFACED_SQL = """
+UPDATE repos SET surfaced = true, surfaced_at = %s
+WHERE id = %s AND NOT surfaced
+"""
+
 DUE_DEEP_SQL = """
 SELECT r.id, r.owner, r.name FROM repos r
 LEFT JOIN LATERAL (
@@ -184,3 +214,23 @@ class RepoStore:
     def touch_snapshot_times(self, repo_id: int) -> None:
         """Mark a repo as freshly snapshotted (sets first time on first snapshot)."""
         self._db.execute(TOUCH_SNAPSHOT_SQL, (repo_id,))
+
+    # -- promotion pipeline (architecture §4) -------------------------------
+
+    def list_candidates(self, limit: int = 100) -> list[tuple]:
+        """Untracked repos — the promotion candidate pool (see PROMOTION_COLUMNS)."""
+        cur = self._db.execute(LIST_CANDIDATES_SQL, (limit,))
+        return [tuple(row) for row in cur.fetchall()]
+
+    def list_tracked_not_surfaced(self, limit: int = 100) -> list[tuple]:
+        """Tracked repos that haven't cleared the significance gate yet."""
+        cur = self._db.execute(LIST_TRACKED_NOT_SURFACED_SQL, (limit,))
+        return [tuple(row) for row in cur.fetchall()]
+
+    def promote_to_tracked(self, repo_id: int) -> int:
+        """Promote a candidate into the tracked snapshot rotation."""
+        return self._db.execute(PROMOTE_TO_TRACKED_SQL, (repo_id,)).rowcount
+
+    def promote_to_surfaced(self, repo_id: int, surfaced_at: str) -> int:
+        """Promote a tracked repo to surfaced (records surfaced_at, once)."""
+        return self._db.execute(PROMOTE_TO_SURFACED_SQL, (surfaced_at, repo_id)).rowcount
