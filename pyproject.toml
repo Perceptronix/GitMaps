@@ -8,6 +8,7 @@ dependencies = [
     "psycopg2-binary>=2.9",
     "sentence-transformers>=3.0",
     "numpy>=1.26",
+    "scikit-learn>=1.3",  # HDBSCAN for the clustering pipeline (Phase 7) — no numba dependency
 ]
 
 [project.optional-dependencies]

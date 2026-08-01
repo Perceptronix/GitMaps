@@ -6,6 +6,8 @@
     python -m gitmaps.worker promote
     python -m gitmaps.worker momentum
     python -m gitmaps.worker embed
+    python -m gitmaps.worker classify
+    python -m gitmaps.worker cluster
 
 Every job runs inside a transaction that COMMITS on success and ROLLS BACK on
 failure (architecture D-10 single-writer, and the fix for the collector's
@@ -20,6 +22,7 @@ import sys
 from typing import Callable, Sequence
 
 from gitmaps.classification import ClassificationRunner
+from gitmaps.clustering import ClusteringRunner
 from gitmaps.collector import DiscoveryRunner
 from gitmaps.config import Settings
 from gitmaps.db import Db
@@ -30,7 +33,7 @@ from gitmaps.promotion import GateConfig, PromotionRunner
 from gitmaps.repo_store import RepoStore
 from gitmaps.snapshotter import SnapshotRunner
 
-JOBS = ("discover", "snapshot_core", "snapshot_deep", "promote", "momentum", "embed", "classify")
+JOBS = ("discover", "snapshot_core", "snapshot_deep", "promote", "momentum", "embed", "classify", "cluster")
 
 
 def run_job(job: str, settings: Settings, store: RepoStore, client_factory: Callable[[Settings], object]) -> str:
@@ -78,6 +81,14 @@ def run_job(job: str, settings: Settings, store: RepoStore, client_factory: Call
             f"classified={classification_result.classified} "
             f"skipped={classification_result.skipped} "
             f"errors={classification_result.errors}"
+        )
+    if job == "cluster":
+        clustering_result = ClusteringRunner(store).run()
+        return (
+            f"cluster: seen={clustering_result.repos_seen} "
+            f"domains={clustering_result.domains_clustered} "
+            f"clusters={clustering_result.clusters_created} "
+            f"assigned={clustering_result.repos_assigned}"
         )
     runner = SnapshotRunner(client, store, budget_per_hour=settings.rate_budget_per_hour)
     if job == "snapshot_core":

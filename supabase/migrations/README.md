@@ -19,6 +19,7 @@ Migrations are applied **in filename order**, which matches the ticket dependenc
 | 09 | `20260731080000_schema_integration_verification.sql` | 09 | Verification gate — asserts all of the above exist; **runs last** |
 | 10 | `20260801000000_repos_embedding_tracking.sql` | 10 | `repos.embedding_fingerprint`, `repos.embedded_at` (additive, embedding incremental state) |
 | 11 | `20260801010000_technology_domains.sql` | — | `repos.domains` (technology domains), `repos.domains_fingerprint`, `repos.classified_at` (additive, classification incremental state) |
+| 12 | `20260801020000_semantic_clustering.sql` | — | `clusters.domain`, `repos.clustered_at` (additive, clustering incremental state) |
 
 ## Applying
 
@@ -40,4 +41,5 @@ For a local Supabase stack: `supabase start`, then `supabase db push`. A CI step
 
 - **Embedding dimension (`384`)** — set in migration 04. It must match the EmbeddingProvider model's output (the architecture's compact open sentence-encoder class, e.g. all-MiniLM-L6-v2, emits 384). Changing the model is a **new additive migration** (new column or re-embed flow), never an edit to 04; the model version lives in `ingestion_state`.
 - **FK delete behavior** — `snapshots` and `momentum_scores` cascade when a `repos` row is deleted; `repos.cluster_id` → `clusters` is `SET NULL` so a layout recompute can replace the cluster set by deleting rows (TRUNCATE would block on the FK).
+- **Clustering (migration 12)** — the clustering pipeline (Phase 7) runs HDBSCAN per technology domain over existing embeddings; `clusters.domain` tags each cluster with the domain it was computed within, and `repos.clustered_at` is the incremental-state column (`clustered_at IS NULL` ⇒ due for the incremental nearest-centroid pass). A tuning change to the algorithm is a re-cluster pass driven by `ingestion_state.clustering_algorithm_version`, not a schema edit.
 - **Concurrent appliers** — the CLI's migration tracking serializes applies; don't bypass it with manual `psql` DDL.

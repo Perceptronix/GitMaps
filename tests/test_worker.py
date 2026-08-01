@@ -13,6 +13,16 @@ from gitmaps.worker import main
 
 from conftest import FakeClient, FakeDb, make_repo
 
+#: Two 5-point blobs around [1,0,0] / [0,1,0] — verified to make HDBSCAN emit
+#: two clusters with the worker's default min_cluster_size=5.
+CLUSTER_BLOB_A: list[list[float]] = [[1, 0, 0], [0.95, 0.31, 0], [0.99, 0.14, 0], [0.93, 0.37, 0], [0.96, 0.28, 0]]
+CLUSTER_BLOB_B: list[list[float]] = [[0, 1, 0], [0.31, 0.95, 0], [0.14, 0.99, 0], [0.37, 0.93, 0], [0.28, 0.96, 0]]
+
+
+def _cluster_row(repo_id: int, embedding: list[float]) -> tuple:
+    # CLUSTERING_COLUMNS order: id, embedding, domains, full_name, description, topics, language.
+    return (repo_id, embedding, ["AI"], f"octocat/repo-{repo_id}", "agent tooling", ["agents"], "Python")
+
 
 def settings() -> Settings:
     return Settings(database_url="postgresql://x", github_tokens=("t",), rate_budget_per_hour=5000)
@@ -130,6 +140,23 @@ def test_classify_job_commits_and_reports(capsys) -> None:
     assert rc == 0
     assert db.commits == 1
     assert "classify: seen=1 classified=1 skipped=0 errors=0" in out.out
+
+
+def test_cluster_job_commits_and_reports(capsys) -> None:
+    db = FakeDb()
+    # No clustering version yet -> full pass. (None,) doubles for get_state
+    # ("no version recorded") and insert_cluster's RETURNING id.
+    db.fetchone_result = (None,)
+    db.fetchall_result = [
+        _cluster_row(1001 + i, v) for i, v in enumerate(CLUSTER_BLOB_A + CLUSTER_BLOB_B)
+    ]
+
+    rc = main(["cluster"], settings=settings(), db=db, client_factory=lambda s: FakeClient())
+
+    out = capsys.readouterr()
+    assert rc == 0
+    assert db.commits == 1
+    assert "cluster: seen=10 domains=1 clusters=2 assigned=10" in out.out
 
 
 def test_unknown_job_prints_usage(capsys) -> None:

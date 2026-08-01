@@ -263,6 +263,63 @@ WHERE id = %s
 
 TOUCH_CLASSIFIED_SQL = "UPDATE repos SET classified_at = %s WHERE id = %s"
 
+#: Clustering SELECT column order — must match `clustering_row_to_input` in
+#: gitmaps/clustering.py. The full pass reads every embedded, classified repo
+#: in the universe (embedding + domains for HDBSCAN, metadata for the labels).
+CLUSTERING_COLUMNS = (
+    "r.id, r.embedding, r.domains, r.full_name, r.description, r.topics, r.language"
+)
+
+CLUSTERING_ALL_SQL_TMPL = f"""
+SELECT {CLUSTERING_COLUMNS} FROM repos r
+WHERE r.embedding IS NOT NULL AND cardinality(r.domains) > 0
+{{universe}}
+ORDER BY r.id
+LIMIT %s OFFSET %s
+"""
+
+#: A repo is due for the incremental clustering pass when it has never been
+#: clustered (clustered_at IS NULL). Only the fields the nearest-centroid
+#: assignment needs are read; the full SELECT above carries the label metadata.
+CLUSTERING_DUE_SQL_TMPL = f"""
+SELECT r.id, r.embedding, r.domains FROM repos r
+WHERE r.embedding IS NOT NULL AND cardinality(r.domains) > 0
+  AND r.clustered_at IS NULL
+{{universe}}
+ORDER BY r.id
+LIMIT %s OFFSET %s
+"""
+
+#: Recompute convention (migration 07): a full pass REPLACES the cluster set;
+#: deleting a cluster row SET NULLs the cluster_id of its member repos, which
+#: the runner then overwrites with the fresh assignments.
+DELETE_CLUSTERS_SQL = "DELETE FROM clusters"
+
+INSERT_CLUSTER_SQL = """
+INSERT INTO clusters (domain, label, label_source, member_count, computed_at)
+VALUES (%s, %s, 'terms', %s, %s)
+RETURNING id
+"""
+
+#: Cluster assignment — one UPDATE for both the full pass (bulk, cluster_id
+#: NULL for noise) and the incremental pass (single repo to an existing
+#: cluster): both set cluster_id + clustered_at together.
+SET_CLUSTER_SQL = "UPDATE repos SET cluster_id = %s, clustered_at = %s WHERE id = %s"
+
+#: Every cluster member's embedding, so the incremental pass can reconstruct
+#: each cluster's centroid (mean of member vectors) in Python.
+CLUSTER_MEMBERS_SQL = """
+SELECT c.id, c.domain, r.embedding
+FROM clusters c JOIN repos r ON r.cluster_id = c.id
+"""
+
+#: Incremental assignment keeps the denormalized member_count honest.
+BUMP_CLUSTER_COUNT_SQL = "UPDATE clusters SET member_count = member_count + 1 WHERE id = %s"
+
+#: A considered-but-unassigned repo (no cluster near enough): mark it processed
+#: so the incremental pass does not retry it until the next full recompute.
+TOUCH_CLUSTERED_SQL = "UPDATE repos SET clustered_at = %s WHERE id = %s"
+
 
 def repo_to_row(repo: dict) -> dict:
     """Map a GitHub REST repository object to a `repos` row.
@@ -580,3 +637,52 @@ class RepoStore:
     def touch_classified_at(self, repo_id: int, classified_at: str) -> None:
         """Advance classified_at without re-classifying (content unchanged)."""
         self._db.execute(TOUCH_CLASSIFIED_SQL, (classified_at, repo_id))
+
+    # -- clustering pipeline (Phase 7) -------------------------------------
+
+    def list_all_for_clustering(self, universe: str = "surfaced", limit: int = 200, offset: int = 0) -> list[tuple]:
+        """Every embedded, classified repo in the universe — the full cluster pass."""
+        and_clause, _ = _universe_sql(universe)
+        sql = CLUSTERING_ALL_SQL_TMPL.format(universe=and_clause)
+        cur = self._db.execute(sql, (limit, offset))
+        return [tuple(row) for row in cur.fetchall()]
+
+    def list_due_for_clustering(self, universe: str = "surfaced", limit: int = 200, offset: int = 0) -> list[tuple]:
+        """Repos that have never been clustered — the incremental pass."""
+        and_clause, _ = _universe_sql(universe)
+        sql = CLUSTERING_DUE_SQL_TMPL.format(universe=and_clause)
+        cur = self._db.execute(sql, (limit, offset))
+        return [tuple(row) for row in cur.fetchall()]
+
+    def delete_clusters(self) -> None:
+        """Drop every cluster row (recompute convention: the set is replaced)."""
+        self._db.execute(DELETE_CLUSTERS_SQL)
+
+    def insert_cluster(self, *, domain: str, label: str, member_count: int, computed_at: str) -> int:
+        """Insert a cluster row and return its generated id (RETURNING id)."""
+        cur = self._db.execute(INSERT_CLUSTER_SQL, (domain, label, member_count, computed_at))
+        return cur.fetchone()[0]
+
+    def set_cluster_memberships(self, rows: list[tuple]) -> None:
+        """Bulk-assign cluster_id + clustered_at to repo ids (cluster_id None = noise)."""
+        if rows:
+            self._db.executemany(SET_CLUSTER_SQL, rows)
+
+    def get_cluster_members(self) -> list[tuple]:
+        """(cluster_id, domain, embedding) for every cluster member, normalized."""
+        cur = self._db.execute(CLUSTER_MEMBERS_SQL)
+        out = []
+        for cluster_id, domain, embedding in cur.fetchall():
+            vec = parse_pgvector(embedding)
+            if vec is not None:
+                out.append((cluster_id, domain, vec))
+        return out
+
+    def assign_repo_to_cluster(self, repo_id: int, cluster_id: int, clustered_at: str) -> None:
+        """Attach a repo to an existing cluster and keep member_count honest."""
+        self._db.execute(SET_CLUSTER_SQL, (cluster_id, clustered_at, repo_id))
+        self._db.execute(BUMP_CLUSTER_COUNT_SQL, (cluster_id,))
+
+    def touch_clustered_at(self, repo_id: int, clustered_at: str) -> None:
+        """Mark a repo considered-but-unassigned (noise) as processed."""
+        self._db.execute(TOUCH_CLUSTERED_SQL, (clustered_at, repo_id))

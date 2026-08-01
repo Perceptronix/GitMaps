@@ -162,6 +162,9 @@ class FakeStore:
         similar_sources: dict[str, tuple] | None = None,
         similar_rows: list[tuple] | None = None,
         classification_due: list[tuple] | None = None,
+        clustering_all: list[tuple] | None = None,
+        clustering_due: list[tuple] | None = None,
+        cluster_member_rows: list[tuple] | None = None,
     ) -> None:
         self.state: dict[str, Any] = dict(state or {})
         self.upserted: list[dict] = []
@@ -200,6 +203,17 @@ class FakeStore:
         self.classification_all_calls: list[tuple[str, int, int]] = []  # (universe, limit, offset)
         self.classification_stored: list[dict] = []  # {repo_id, domains, fingerprint, classified_at}
         self.classification_touched: list[tuple[int, str]] = []  # (repo_id, classified_at)
+        # clustering pipeline
+        self.clustering_all: list[tuple] = list(clustering_all or [])
+        self.clustering_due: list[tuple] = list(clustering_due or [])
+        self.clustering_all_calls: list[tuple[str, int, int]] = []  # (universe, limit, offset)
+        self.clustering_due_calls: list[tuple[str, int, int]] = []  # (universe, limit, offset)
+        self.clusters: list[dict] = []  # inserted cluster rows (id, domain, label, label_source, member_count)
+        self.cluster_id_seq: int = 0
+        self.cluster_memberships: list[tuple] = []  # (cluster_id|None, clustered_at, repo_id)
+        self.cluster_member_rows: list[tuple] = list(cluster_member_rows or [])  # (cluster_id, domain, embedding)
+        self.cluster_assignments: list[tuple[int, int, str]] = []  # (repo_id, cluster_id, clustered_at)
+        self.cluster_touches: list[tuple[int, str]] = []  # (repo_id, clustered_at)
 
     def upsert(self, repo: dict) -> int:
         self.upserted.append(repo)
@@ -325,6 +339,40 @@ class FakeStore:
 
     def touch_classified_at(self, repo_id: int, classified_at: str) -> None:
         self.classification_touched.append((repo_id, classified_at))
+
+    def list_all_for_clustering(self, universe: str = "surfaced", limit: int = 200, offset: int = 0) -> list[tuple]:
+        self.clustering_all_calls.append((universe, limit, offset))
+        return self.clustering_all[offset : offset + limit]
+
+    def list_due_for_clustering(self, universe: str = "surfaced", limit: int = 200, offset: int = 0) -> list[tuple]:
+        self.clustering_due_calls.append((universe, limit, offset))
+        return self.clustering_due[offset : offset + limit]
+
+    def delete_clusters(self) -> None:
+        self.clusters.clear()
+
+    def insert_cluster(self, *, domain: str, label: str, member_count: int, computed_at: str) -> int:
+        self.cluster_id_seq += 1
+        self.clusters.append(
+            {"id": self.cluster_id_seq, "domain": domain, "label": label,
+             "label_source": "terms", "member_count": member_count, "computed_at": computed_at}
+        )
+        return self.cluster_id_seq
+
+    def set_cluster_memberships(self, rows: list[tuple]) -> None:
+        self.cluster_memberships.extend(rows)
+
+    def get_cluster_members(self) -> list[tuple]:
+        return list(self.cluster_member_rows)
+
+    def assign_repo_to_cluster(self, repo_id: int, cluster_id: int, clustered_at: str) -> None:
+        self.cluster_assignments.append((repo_id, cluster_id, clustered_at))
+        for cluster in self.clusters:
+            if cluster["id"] == cluster_id:
+                cluster["member_count"] += 1
+
+    def touch_clustered_at(self, repo_id: int, clustered_at: str) -> None:
+        self.cluster_touches.append((repo_id, clustered_at))
 
 
 def fixed_clock(epoch: float) -> tuple[Callable[[], float], list[float]]:
