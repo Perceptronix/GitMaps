@@ -197,6 +197,35 @@ WHERE id = %s
 
 TOUCH_EMBEDDED_SQL = "UPDATE repos SET embedded_at = %s WHERE id = %s"
 
+#: Source row for the Similar repositories query (architecture §9): the source
+#: repo's id + embedding + the filterable metadata. The embedding is the query
+#: vector the ANN measures distance from.
+SIMILAR_SOURCE_SQL = """
+SELECT id, embedding, language, topics FROM repos WHERE full_name = %s
+"""
+
+#: Similar-repo SELECT columns — must match `row_to_similar` in
+#: gitmaps/similarity.py.
+SIMILAR_COLUMNS = (
+    "r.id, r.owner, r.name, r.full_name, r.description, r.language, "
+    "r.topics, r.stars, r.surfaced"
+)
+
+#: The HNSW ANN query (architecture §7/§9, migration 04): the source repo's
+#: nearest neighbors by cosine distance, never itself, ordered by the `<=>`
+#: operator so `repos_embedding_hnsw_idx` can serve it. `{filters}` holds the
+#: optional language / topic / min-similarity WHERE clauses (see find_similar).
+SIMILAR_QUERY_TMPL = f"""
+SELECT {SIMILAR_COLUMNS},
+       1 - (r.embedding <=> %s::vector) AS similarity
+FROM repos r
+WHERE r.embedding IS NOT NULL
+  AND r.id != %s
+{{filters}}
+ORDER BY r.embedding <=> %s::vector
+LIMIT %s
+"""
+
 
 def repo_to_row(repo: dict) -> dict:
     """Map a GitHub REST repository object to a `repos` row.
@@ -252,6 +281,23 @@ def embedding_queries(universe: str) -> tuple[str, str]:
 def vector_to_pgvector(vector) -> str:
     """Format a Python list of floats as a pgvector literal ("[1.0,2.0,...]")."""
     return "[" + ",".join(str(float(v)) for v in vector) + "]"
+
+
+def parse_pgvector(value) -> list[float] | None:
+    """Normalize a pgvector column value to a list of floats (or None).
+
+    Without the pgvector-psycopg2 caster, a SELECTed vector column comes back
+    as its text form ("[0.1,0.2,...]"); with the caster registered it is
+    already a list. The Similar repositories query reads the source repo's
+    embedding, so it normalizes here — the query path then re-formats with
+    `vector_to_pgvector` regardless of which form psycopg2 returned.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        inner = value.strip().strip("[]")
+        return [float(part) for part in inner.split(",")] if inner else []
+    return [float(part) for part in value]
 
 
 class RepoStore:
@@ -410,3 +456,52 @@ class RepoStore:
     def touch_embedded_at(self, repo_id: int, embedded_at: str) -> None:
         """Advance embedded_at without re-embedding (content verified unchanged)."""
         self._db.execute(TOUCH_EMBEDDED_SQL, (embedded_at, repo_id))
+
+    # -- similarity pipeline (architecture §9) -------------------------------
+
+    def get_similar_source(self, full_name: str) -> tuple | None:
+        """The source repo's (id, embedding, language, topics) — or None.
+
+        The embedding is normalized to a list of floats (`parse_pgvector`), so
+        the query path can hand it back to `find_similar` unchanged.
+        """
+        cur = self._db.execute(SIMILAR_SOURCE_SQL, (full_name,))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        id_, embedding, language, topics = row
+        return (id_, parse_pgvector(embedding), language, topics)
+
+    def find_similar(
+        self,
+        repo_id: int,
+        query_vector,
+        *,
+        limit: int,
+        language: str | None = None,
+        topic: str | None = None,
+        min_similarity: float | None = None,
+    ) -> list[tuple]:
+        """Top-`limit` repos nearest to `query_vector` (HNSW cosine), source excluded.
+
+        `language` filters to that exact primary language; `topic` to repos
+        carrying that topic (text[] membership); `min_similarity` is a
+        relevance floor on the returned score (architecture §9). The row order
+        is `SIMILAR_COLUMNS + (similarity)` — see `row_to_similar` in
+        gitmaps/similarity.py.
+        """
+        filters: list[str] = []
+        params: list = [vector_to_pgvector(query_vector), repo_id]
+        if language is not None:
+            filters.append("AND r.language = %s")
+            params.append(language)
+        if topic is not None:
+            filters.append("AND %s = ANY(r.topics)")
+            params.append(topic)
+        if min_similarity is not None:
+            filters.append("AND 1 - (r.embedding <=> %s::vector) >= %s")
+            params.extend((vector_to_pgvector(query_vector), min_similarity))
+        sql = SIMILAR_QUERY_TMPL.format(filters="\n".join(filters))
+        params.extend((vector_to_pgvector(query_vector), limit))  # ORDER BY, LIMIT
+        cur = self._db.execute(sql, params)
+        return [tuple(row) for row in cur.fetchall()]

@@ -159,6 +159,8 @@ class FakeStore:
         repo_created_at: dict[int, Any] | None = None,
         embedding_due: list[tuple] | None = None,
         embedding_all: list[tuple] | None = None,
+        similar_sources: dict[str, tuple] | None = None,
+        similar_rows: list[tuple] | None = None,
     ) -> None:
         self.state: dict[str, Any] = dict(state or {})
         self.upserted: list[dict] = []
@@ -186,6 +188,11 @@ class FakeStore:
         self.embedding_all_calls: list[tuple[str, int, int]] = []  # (universe, limit, offset)
         self.embedding_stored: list[dict] = []
         self.embedded_touched: list[tuple[int, str]] = []  # (repo_id, embedded_at)
+        # similarity pipeline
+        self.similar_sources: dict[str, tuple] = dict(similar_sources or {})  # full_name -> (id, embedding, language, topics)
+        self.similar_rows: list[tuple] = list(similar_rows or [])
+        self.similar_source_calls: list[str] = []  # full_name lookups
+        self.similar_calls: list[dict] = []  # find_similar kwargs
 
     def upsert(self, repo: dict) -> int:
         self.upserted.append(repo)
@@ -274,6 +281,26 @@ class FakeStore:
 
     def touch_embedded_at(self, repo_id: int, embedded_at: str) -> None:
         self.embedded_touched.append((repo_id, embedded_at))
+
+    def get_similar_source(self, full_name: str) -> tuple | None:
+        self.similar_source_calls.append(full_name)
+        return self.similar_sources.get(full_name)
+
+    def find_similar(
+        self,
+        repo_id: int,
+        query_vector,
+        *,
+        limit: int,
+        language: str | None = None,
+        topic: str | None = None,
+        min_similarity: float | None = None,
+    ) -> list[tuple]:
+        self.similar_calls.append(
+            {"repo_id": repo_id, "query_vector": query_vector, "limit": limit,
+             "language": language, "topic": topic, "min_similarity": min_similarity}
+        )
+        return self.similar_rows[:limit]
 
 
 def fixed_clock(epoch: float) -> tuple[Callable[[], float], list[float]]:
