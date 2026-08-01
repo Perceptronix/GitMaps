@@ -19,6 +19,7 @@ from __future__ import annotations
 import sys
 from typing import Callable, Sequence
 
+from gitmaps.classification import ClassificationRunner
 from gitmaps.collector import DiscoveryRunner
 from gitmaps.config import Settings
 from gitmaps.db import Db
@@ -29,7 +30,7 @@ from gitmaps.promotion import GateConfig, PromotionRunner
 from gitmaps.repo_store import RepoStore
 from gitmaps.snapshotter import SnapshotRunner
 
-JOBS = ("discover", "snapshot_core", "snapshot_deep", "promote", "momentum", "embed")
+JOBS = ("discover", "snapshot_core", "snapshot_deep", "promote", "momentum", "embed", "classify")
 
 
 def run_job(job: str, settings: Settings, store: RepoStore, client_factory: Callable[[Settings], object]) -> str:
@@ -67,6 +68,16 @@ def run_job(job: str, settings: Settings, store: RepoStore, client_factory: Call
             f"embed: seen={embedding_result.repos_seen} "
             f"embedded={embedding_result.embedded} "
             f"skipped={embedding_result.skipped} model={embedding_result.model_version}"
+        )
+    if job == "classify":
+        classification_result = ClassificationRunner(
+            client, store, budget_per_hour=settings.rate_budget_per_hour
+        ).run()
+        return (
+            f"classify: seen={classification_result.repos_seen} "
+            f"classified={classification_result.classified} "
+            f"skipped={classification_result.skipped} "
+            f"errors={classification_result.errors}"
         )
     runner = SnapshotRunner(client, store, budget_per_hour=settings.rate_budget_per_hour)
     if job == "snapshot_core":

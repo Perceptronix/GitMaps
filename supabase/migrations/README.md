@@ -18,6 +18,7 @@ Migrations are applied **in filename order**, which matches the ticket dependenc
 | 08 | `20260731070000_ingestion_state_job_budget.sql` | 08 | `ingestion_state` (key/value job/budget state) |
 | 09 | `20260731080000_schema_integration_verification.sql` | 09 | Verification gate — asserts all of the above exist; **runs last** |
 | 10 | `20260801000000_repos_embedding_tracking.sql` | 10 | `repos.embedding_fingerprint`, `repos.embedded_at` (additive, embedding incremental state) |
+| 11 | `20260801010000_technology_domains.sql` | — | `repos.domains` (technology domains), `repos.domains_fingerprint`, `repos.classified_at` (additive, classification incremental state) |
 
 ## Applying
 

@@ -161,6 +161,7 @@ class FakeStore:
         embedding_all: list[tuple] | None = None,
         similar_sources: dict[str, tuple] | None = None,
         similar_rows: list[tuple] | None = None,
+        classification_due: list[tuple] | None = None,
     ) -> None:
         self.state: dict[str, Any] = dict(state or {})
         self.upserted: list[dict] = []
@@ -193,6 +194,12 @@ class FakeStore:
         self.similar_rows: list[tuple] = list(similar_rows or [])
         self.similar_source_calls: list[str] = []  # full_name lookups
         self.similar_calls: list[dict] = []  # find_similar kwargs
+        # classification pipeline
+        self.classification_due: list[tuple] = list(classification_due or [])
+        self.classification_due_calls: list[tuple[str, int, int]] = []  # (universe, limit, offset)
+        self.classification_all_calls: list[tuple[str, int, int]] = []  # (universe, limit, offset)
+        self.classification_stored: list[dict] = []  # {repo_id, domains, fingerprint, classified_at}
+        self.classification_touched: list[tuple[int, str]] = []  # (repo_id, classified_at)
 
     def upsert(self, repo: dict) -> int:
         self.upserted.append(repo)
@@ -301,6 +308,23 @@ class FakeStore:
              "language": language, "topic": topic, "min_similarity": min_similarity}
         )
         return self.similar_rows[:limit]
+
+    def list_due_for_classification(self, universe: str = "surfaced", limit: int = 100, offset: int = 0) -> list[tuple]:
+        self.classification_due_calls.append((universe, limit, offset))
+        return self.classification_due[offset : offset + limit]
+
+    def list_all_for_classification(self, universe: str = "surfaced", limit: int = 100, offset: int = 0) -> list[tuple]:
+        self.classification_all_calls.append((universe, limit, offset))
+        return self.classification_due[offset : offset + limit]
+
+    def store_classification(self, repo_id: int, domains: list[str], fingerprint: str, classified_at: str) -> int:
+        self.classification_stored.append(
+            {"repo_id": repo_id, "domains": domains, "fingerprint": fingerprint, "classified_at": classified_at}
+        )
+        return 1
+
+    def touch_classified_at(self, repo_id: int, classified_at: str) -> None:
+        self.classification_touched.append((repo_id, classified_at))
 
 
 def fixed_clock(epoch: float) -> tuple[Callable[[], float], list[float]]:

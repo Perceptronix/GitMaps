@@ -226,6 +226,43 @@ ORDER BY r.embedding <=> %s::vector
 LIMIT %s
 """
 
+#: Classification SELECT column order — must match
+#: `classification_row_to_input` in gitmaps/classification.py.
+CLASSIFICATION_COLUMNS = (
+    "r.id, r.owner, r.name, r.full_name, r.description, r.topics, "
+    "r.language, r.homepage, r.domains_fingerprint"
+)
+
+#: A repo is due for classification when it has never been classified, or its
+#: content may have changed since (classified_at < pushed_at). {universe} is a
+#: validated "AND r.surfaced" (surfaced-only) or "" (all repos) fragment.
+CLASSIFICATION_DUE_SQL_TMPL = f"""
+SELECT {CLASSIFICATION_COLUMNS} FROM repos r
+WHERE (r.domains_fingerprint IS NULL OR r.classified_at IS NULL OR r.classified_at < r.pushed_at)
+{{universe}}
+ORDER BY r.id
+LIMIT %s OFFSET %s
+"""
+
+#: Full re-classification pass (taxonomy change / first run): every repo in the
+#: universe, so a retuned taxonomy propagates to already-classified repos.
+CLASSIFICATION_ALL_SQL_TMPL = f"""
+SELECT {CLASSIFICATION_COLUMNS} FROM repos r
+{{where}}
+ORDER BY r.id
+LIMIT %s OFFSET %s
+"""
+
+UPDATE_CLASSIFICATION_SQL = """
+UPDATE repos SET
+    domains = %s,
+    domains_fingerprint = %s,
+    classified_at = %s
+WHERE id = %s
+"""
+
+TOUCH_CLASSIFIED_SQL = "UPDATE repos SET classified_at = %s WHERE id = %s"
+
 
 def repo_to_row(repo: dict) -> dict:
     """Map a GitHub REST repository object to a `repos` row.
@@ -260,18 +297,24 @@ def repo_to_row(repo: dict) -> dict:
     }
 
 
-def embedding_queries(universe: str) -> tuple[str, str]:
-    """The (due, full) embedding SELECTs for a universe; validates the value.
+def _universe_sql(universe: str) -> tuple[str, str]:
+    """The validated (AND-clause, WHERE-clause) fragments for a universe.
 
     `universe` is the only SQL-influencing input, and it is validated against
     the two known values, so the fragment interpolation cannot inject SQL.
+    `AND r.surfaced` / `WHERE r.surfaced` narrow a query to the surfaced tier;
+    `("", "")` means every repository.
     """
     if universe == "surfaced":
-        universe_clause, where_clause = "AND r.surfaced", "WHERE r.surfaced"
-    elif universe == "all":
-        universe_clause, where_clause = "", ""
-    else:
-        raise ValueError(f"universe must be 'surfaced' or 'all', got {universe!r}")
+        return "AND r.surfaced", "WHERE r.surfaced"
+    if universe == "all":
+        return "", ""
+    raise ValueError(f"universe must be 'surfaced' or 'all', got {universe!r}")
+
+
+def embedding_queries(universe: str) -> tuple[str, str]:
+    """The (due, full) embedding SELECTs for a universe; validates the value."""
+    universe_clause, where_clause = _universe_sql(universe)
     return (
         EMBEDDING_DUE_SQL_TMPL.format(universe=universe_clause),
         EMBEDDING_ALL_SQL_TMPL.format(where=where_clause),
@@ -505,3 +548,35 @@ class RepoStore:
         params.extend((vector_to_pgvector(query_vector), limit))  # ORDER BY, LIMIT
         cur = self._db.execute(sql, params)
         return [tuple(row) for row in cur.fetchall()]
+
+    # -- technology classification pipeline (Phase 6.5) ---------------------
+
+    def list_due_for_classification(self, universe: str = "surfaced", limit: int = 100, offset: int = 0) -> list[tuple]:
+        """Repos due for classification, oldest-first (never/unchanged-checked).
+
+        A repo is due when it has never been classified (`domains_fingerprint`
+        NULL) or its content may have changed since (`classified_at <
+        pushed_at`). The runner still skips content that is unchanged via the
+        fingerprint, exactly like the embedding pass.
+        """
+        and_clause, _ = _universe_sql(universe)
+        sql = CLASSIFICATION_DUE_SQL_TMPL.format(universe=and_clause)
+        cur = self._db.execute(sql, (limit, offset))
+        return [tuple(row) for row in cur.fetchall()]
+
+    def list_all_for_classification(self, universe: str = "surfaced", limit: int = 100, offset: int = 0) -> list[tuple]:
+        """Every repo in the universe (full pass after a taxonomy change)."""
+        _, where_clause = _universe_sql(universe)
+        sql = CLASSIFICATION_ALL_SQL_TMPL.format(where=where_clause)
+        cur = self._db.execute(sql, (limit, offset))
+        return [tuple(row) for row in cur.fetchall()]
+
+    def store_classification(self, repo_id: int, domains: list[str], fingerprint: str, classified_at: str) -> int:
+        """Write the assigned domains + the fingerprint that produced them."""
+        return self._db.execute(
+            UPDATE_CLASSIFICATION_SQL, (domains, fingerprint, classified_at, repo_id)
+        ).rowcount
+
+    def touch_classified_at(self, repo_id: int, classified_at: str) -> None:
+        """Advance classified_at without re-classifying (content unchanged)."""
+        self._db.execute(TOUCH_CLASSIFIED_SQL, (classified_at, repo_id))

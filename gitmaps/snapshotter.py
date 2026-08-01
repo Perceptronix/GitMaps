@@ -17,19 +17,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
+from gitmaps.budget import RATE_BUDGET_KEY, rate_budget_state
 from gitmaps.github.client import GitHubApiError, RateLimitError
 from gitmaps.repo_store import repo_to_row
 from gitmaps.timeutil import utc_stamp
 
-RATE_BUDGET_KEY = "rate_budget"
-
 #: A repo is "due" when its last snapshot of that kind predates this window.
 CORE_DUE_HOURS = 20
 DEEP_DUE_DAYS = 6
-
-
-def _hour_stamp(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%dT%H:00:00Z")
 
 
 @dataclass(frozen=True)
@@ -79,7 +74,7 @@ class SnapshotRunner:
 
         # Rolling per-hour rate budget (§6): read the current hour's counter;
         # if another run already spent it, abort before any request.
-        budget = self._budget_state(now) if self._budget_per_hour is not None else None
+        budget = rate_budget_state(self._store, now) if self._budget_per_hour is not None else None
 
         attempted = 0
         inserted = 0
@@ -143,14 +138,3 @@ class SnapshotRunner:
         )
         self._store.touch_snapshot_times(repo_id)
         return inserted
-
-    def _budget_state(self, now: datetime) -> dict:
-        hour = _hour_stamp(now)
-        current = self._store.get_state(RATE_BUDGET_KEY) or {}
-        if current.get("hour") != hour:
-            return {"hour": hour, "used": 0}
-        try:
-            used = int(current.get("used", 0))
-        except (TypeError, ValueError):
-            used = 0
-        return {"hour": hour, "used": used}

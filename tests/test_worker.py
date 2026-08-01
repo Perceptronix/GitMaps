@@ -115,6 +115,23 @@ def test_embed_job_commits_and_reports(capsys) -> None:
     assert "embed: seen=1 embedded=1 skipped=0 model=sentence-transformers/all-MiniLM-L6-v2:384" in out.out
 
 
+def test_classify_job_commits_and_reports(capsys) -> None:
+    db = FakeDb()
+    # No taxonomy version yet -> full pass.
+    db.fetchone_result = None
+    db.fetchall_result = [
+        (1001, "octocat", "hello", "octocat/hello", "A demo repo", ["cli"], "Python", "https://x", None),
+    ]
+    client = FakeClient(responses={"/repos/octocat/hello/readme": "# README about docker"})
+
+    rc = main(["classify"], settings=settings(), db=db, client_factory=lambda s: client)
+
+    out = capsys.readouterr()
+    assert rc == 0
+    assert db.commits == 1
+    assert "classify: seen=1 classified=1 skipped=0 errors=0" in out.out
+
+
 def test_unknown_job_prints_usage(capsys) -> None:
     rc = main(["bogus"])
 

@@ -35,6 +35,7 @@ from typing import Any, Callable, Sequence
 
 import requests
 
+from gitmaps.budget import RATE_BUDGET_KEY, rate_budget_state
 from gitmaps.github.client import GitHubApiError, RateLimitError
 from gitmaps.timeutil import utc_stamp
 
@@ -44,15 +45,6 @@ DEFAULT_DIMENSION = 384
 #: Documented ingestion_state key (ticket 08 convention): the embedding model
 #: version the stored vectors were produced with.
 MODEL_VERSION_KEY = "embedding_model_version"
-
-#: The shared rolling per-hour GitHub rate budget (architecture §6) — the same
-#: key the snapshot jobs draw from, so the embed pass cannot exhaust the day's
-#: API budget by itself.
-RATE_BUDGET_KEY = "rate_budget"
-
-
-def _hour_stamp(dt: datetime) -> str:
-    return dt.strftime("%Y-%m-%dT%H:00:00Z")
 
 
 class EmbeddingProviderError(RuntimeError):
@@ -334,7 +326,7 @@ class EmbeddingRunner:
         # Rolling per-hour rate budget (§6): read the current hour's counter;
         # if another run already spent it, abort before any request. One README
         # fetch charges 1 against the same pool the snapshot jobs draw from.
-        budget = self._budget_state(self._now()) if self._budget_per_hour is not None else None
+        budget = rate_budget_state(self._store, self._now()) if self._budget_per_hour is not None else None
 
         while True:
             rows = self._page(force_full, offset)
@@ -413,15 +405,3 @@ class EmbeddingRunner:
         if force_full:
             return self._store.list_all_for_embedding(self._config.universe, self._batch_size, offset)
         return self._store.list_due_for_embedding(self._config.universe, self._batch_size, offset)
-
-    def _budget_state(self, now: datetime) -> dict:
-        """The shared rolling per-hour budget, reset when the hour rolls over."""
-        hour = _hour_stamp(now)
-        current = self._store.get_state(RATE_BUDGET_KEY) or {}
-        if current.get("hour") != hour:
-            return {"hour": hour, "used": 0}
-        try:
-            used = int(current.get("used", 0))
-        except (TypeError, ValueError):
-            used = 0
-        return {"hour": hour, "used": used}
