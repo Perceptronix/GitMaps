@@ -9,7 +9,13 @@ renamed repository updates its row rather than duplicating it.
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
+
+from gitmaps.momentum import PERIOD_DAYS
+# Import from schemas since momentum module doesn't define these classes
+# They are used only for API response serialization
+from gitmaps.api.schemas import MomentumSignal, MomentumPeriod, MomentumScores
 
 REPO_UPSERT_SQL = """
 INSERT INTO repos (
@@ -320,6 +326,32 @@ BUMP_CLUSTER_COUNT_SQL = "UPDATE clusters SET member_count = member_count + 1 WH
 #: so the incremental pass does not retry it until the next full recompute.
 TOUCH_CLUSTERED_SQL = "UPDATE repos SET clustered_at = %s WHERE id = %s"
 
+#: Layout (Phase 8) — every cluster member's embedding, for the full pass to
+#: recompute centroids and scatter members around them.
+LAYOUT_MEMBERS_SQL = """
+SELECT r.id, r.cluster_id, r.embedding
+FROM repos r
+WHERE r.cluster_id IS NOT NULL AND r.embedding IS NOT NULL
+ORDER BY r.id
+"""
+
+SET_CLUSTER_POSITION_SQL = "UPDATE clusters SET centroid_x = %s, centroid_y = %s WHERE id = %s"
+
+#: Clusters with a centroid — the anchors the incremental pass places new
+#: members around.
+CLUSTER_POSITIONS_SQL = """
+SELECT id, domain, label, centroid_x, centroid_y FROM clusters WHERE centroid_x IS NOT NULL
+"""
+
+#: A cluster member with no map position yet is due for the incremental anchor.
+LAYOUT_DUE_SQL = """
+SELECT r.id, r.cluster_id FROM repos r
+WHERE r.cluster_id IS NOT NULL AND r.map_x IS NULL
+ORDER BY r.id
+"""
+
+SET_REPO_POSITION_SQL = "UPDATE repos SET map_x = %s, map_y = %s WHERE id = %s"
+
 
 def repo_to_row(repo: dict) -> dict:
     """Map a GitHub REST repository object to a `repos` row.
@@ -425,6 +457,136 @@ class RepoStore:
         # psycopg2 parses jsonb columns to Python objects natively — no
         # json.loads here (that would double-parse and fail on bare strings).
         return row[0]
+
+    def get_repo_by_id(self, repo_id: int) -> dict | None:
+        """Get a repo by ID, returning the full_name and embedding."""
+        cur = self._db.execute(
+            "SELECT full_name, embedding FROM repos WHERE id = %s", (repo_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+        return {"full_name": row[0], "embedding": row[1]}
+
+    def get_repo_detail(self, repo_id: int) -> dict | None:
+        """Get full repository detail by ID."""
+        cur = self._db.execute(
+            """
+            SELECT
+                r.id, r.owner, r.name, r.full_name, r.description, r.topics, r.language,
+                r.license, r.homepage, r.archived, r.is_fork, r.created_at, r.pushed_at,
+                r.stars, r.forks, r.watchers, r.open_issues,
+                r.tracked, r.surfaced, r.surfaced_at,
+                r.significance_score, r.significance_vars,
+                r.domains, r.domains_fingerprint, r.classified_at,
+                r.embedding_fingerprint, r.embedded_at,
+                r.cluster_id, r.clustered_at,
+                r.map_x, r.map_y
+            FROM repos r
+            WHERE r.id = %s
+            """,
+            (repo_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return None
+
+        (
+            id_, owner, name, full_name, description, topics, language, license_,
+            homepage, archived, is_fork, created_at, pushed_at,
+            stars, forks, watchers, open_issues,
+            tracked, surfaced, surfaced_at,
+            significance_score, significance_vars,
+            domains, domains_fingerprint, classified_at,
+            embedding_fingerprint, embedded_at,
+            cluster_id, clustered_at,
+            map_x, map_y,
+        ) = row
+
+        # Get momentum scores if available
+        momentum = None
+        cur = self._db.execute(
+            """
+            SELECT period, computed_at, score, decomposition
+            FROM momentum_scores
+            WHERE repo_id = %s
+            ORDER BY period
+            """,
+            (repo_id,),
+        )
+        momentum_rows = cur.fetchall()
+        if momentum_rows:
+            periods = {}
+            computed_at = None
+            for period, comp_at, score, decomp in momentum_rows:
+                if computed_at is None:
+                    computed_at = comp_at
+                signals = {}
+                for signal_name, signal_data in decomp.get("signals", {}).items():
+                    signals[signal_name] = MomentumSignal(
+                        signal=signal_name,
+                        start=signal_data.get("start"),
+                        end=signal_data.get("end"),
+                        growth=signal_data.get("growth", 0.0),
+                        span_days=signal_data.get("span_days", 0.0),
+                        growth_per_day=signal_data.get("growth_per_day", 0.0),
+                        prior_floor=signal_data.get("prior_floor", 10.0),
+                        size_factor=signal_data.get("size_factor", 1.0),
+                        target_per_day=signal_data.get("target_per_day", 1.0),
+                        weight=signal_data.get("weight", 0.0),
+                        score=signal_data.get("score", 0.0),
+                        contribution=signal_data.get("contribution", 0.0),
+                    )
+                periods[period] = MomentumPeriod(
+                    period=period,
+                    score=score,
+                    window_days=PERIOD_DAYS.get(period, 0),
+                    age_days=decomp.get("age_days"),
+                    age_factor=decomp.get("age_factor", 1.0),
+                    age_cap=decomp.get("age_cap", 2.5),
+                    max_signal_score=decomp.get("max_signal_score", 20.0),
+                    signals=signals,
+                )
+            momentum = MomentumScores(
+                repo_id=repo_id,
+                computed_at=computed_at or datetime.now(),
+                periods=periods,
+            )
+
+        return {
+            "id": id_,
+            "owner": owner,
+            "name": name,
+            "full_name": full_name,
+            "description": description,
+            "topics": list(topics or []),
+            "language": language,
+            "license": license_,
+            "homepage": homepage,
+            "archived": archived,
+            "is_fork": is_fork,
+            "created_at": created_at,
+            "pushed_at": pushed_at,
+            "stars": stars,
+            "forks": forks,
+            "watchers": watchers,
+            "open_issues": open_issues,
+            "tracked": tracked,
+            "surfaced": surfaced,
+            "surfaced_at": surfaced_at,
+            "significance_score": significance_score,
+            "significance_vars": significance_vars,
+            "domains": list(domains or []),
+            "domains_fingerprint": domains_fingerprint,
+            "classified_at": classified_at,
+            "embedding_fingerprint": embedding_fingerprint,
+            "embedded_at": embedded_at,
+            "cluster_id": cluster_id,
+            "clustered_at": clustered_at,
+            "map_x": map_x,
+            "map_y": map_y,
+            "momentum": momentum,
+        }
 
     def set_state(self, key: str, value: Any) -> None:
         self._db.execute(STATE_UPSERT_SQL, (key, json.dumps(value)))
@@ -686,3 +848,367 @@ class RepoStore:
     def touch_clustered_at(self, repo_id: int, clustered_at: str) -> None:
         """Mark a repo considered-but-unassigned (noise) as processed."""
         self._db.execute(TOUCH_CLUSTERED_SQL, (clustered_at, repo_id))
+
+    # -- semantic-map layout (Phase 8) --------------------------------------
+
+    def list_layout_members(self) -> list[tuple]:
+        """(repo_id, cluster_id, embedding) for every cluster member — the full pass."""
+        cur = self._db.execute(LAYOUT_MEMBERS_SQL)
+        return [tuple(row) for row in cur.fetchall()]
+
+    def set_cluster_position(self, cluster_id: int, x: float, y: float) -> None:
+        """Write a cluster's 2D centroid position."""
+        self._db.execute(SET_CLUSTER_POSITION_SQL, (x, y, cluster_id))
+
+    def list_cluster_positions(self) -> list[tuple]:
+        """(cluster_id, centroid_x, centroid_y) for clusters with a centroid."""
+        cur = self._db.execute(CLUSTER_POSITIONS_SQL)
+        return [tuple(row) for row in cur.fetchall()]
+
+    def list_due_layout(self) -> list[tuple]:
+        """(repo_id, cluster_id) for cluster members with no map position yet."""
+        cur = self._db.execute(LAYOUT_DUE_SQL)
+        return [tuple(row) for row in cur.fetchall()]
+
+    def list_repo_positions(self, limit: int, offset: int) -> list[tuple]:
+        """Get paginated repository map positions."""
+        cur = self._db.execute(
+            """
+            SELECT id, map_x, map_y FROM repos
+            WHERE map_x IS NOT NULL AND map_y IS NOT NULL
+            ORDER BY id
+            LIMIT %s OFFSET %s
+            """,
+            (limit, offset),
+        )
+        return [tuple(row) for row in cur.fetchall()]
+
+    def count_repo_positions(self) -> int:
+        """Get total count of repositories with map positions."""
+        cur = self._db.execute(
+            "SELECT COUNT(*) FROM repos WHERE map_x IS NOT NULL AND map_y IS NOT NULL"
+        )
+        return cur.fetchone()[0]
+
+    def set_repo_positions(self, rows: list[tuple]) -> None:
+        """Bulk-write map_x/map_y for repo ids."""
+        if rows:
+            self._db.executemany(SET_REPO_POSITION_SQL, rows)
+
+    # -- API helper methods -----------------------------------------------------
+
+    def list_clusters(
+        self,
+        *,
+        pagination,
+        sort,
+        domain: str | None = None,
+    ):
+        """List clusters with pagination, sorting, and filtering."""
+        from gitmaps.api.schemas import ClustersResponse, ClusterSummary
+
+        where_clauses = ["centroid_x IS NOT NULL", "centroid_y IS NOT NULL"]
+        params: list = []
+
+        if domain:
+            where_clauses.append("domain = %s")
+            params.append(domain)
+
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+        valid_sort = {"id": "id", "domain": "domain", "label": "label", "member_count": "member_count", "computed_at": "computed_at"}
+        sort_field = valid_sort.get(sort.sort, "id")
+        order = "ASC" if sort.order.lower() == "asc" else "DESC"
+
+        # Total count
+        cur = self._db.execute(
+            f"SELECT COUNT(*) FROM clusters {where_sql}",
+            tuple(params),
+        )
+        total = cur.fetchone()[0]
+
+        # Paginated results
+        params.extend([pagination.limit, pagination.offset])
+        cur = self._db.execute(
+            f"""
+            SELECT id, domain, label, label_source, member_count, computed_at,
+                   centroid_x, centroid_y
+            FROM clusters
+            {where_sql}
+            ORDER BY {sort_field} {order}
+            LIMIT %s OFFSET %s
+            """,
+            tuple(params),
+        )
+        rows = cur.fetchall()
+
+        items = [
+            ClusterSummary(
+                id=row[0],
+                domain=row[1],
+                label=row[2],
+                member_count=row[4],
+                centroid_x=row[6],
+                centroid_y=row[7],
+                computed_at=row[5],
+            )
+            for row in rows
+        ]
+
+        total_pages = (total + pagination.per_page - 1) // pagination.per_page
+
+        return ClustersResponse(
+            items=items,
+            page=pagination.page,
+            per_page=pagination.per_page,
+            total=total,
+            total_pages=total_pages,
+        )
+
+    def search_repos(
+        self,
+        *,
+        pagination,
+        sort,
+        q: str | None = None,
+        language: str | None = None,
+        topics: list[str] | None = None,
+        domains: list[str] | None = None,
+        min_stars: int | None = None,
+        max_stars: int | None = None,
+        tracked: bool | None = None,
+        surfaced: bool | None = None,
+        has_cluster: bool | None = None,
+        has_map_position: bool | None = None,
+    ):
+        """Search repositories with full-text and filter support."""
+        from gitmaps.api.schemas import SearchResponse, RepoBase
+
+        where_clauses = []
+        params: list = []
+
+        # Full-text search
+        if q:
+            where_clauses.append(
+                "(r.full_name ILIKE %s OR r.description ILIKE %s OR "
+                "EXISTS (SELECT 1 FROM unnest(r.topics) t WHERE t ILIKE %s))"
+            )
+            search_term = f"%{q}%"
+            params.extend([search_term, search_term, search_term])
+
+        # Language filter
+        if language:
+            where_clauses.append("r.language = %s")
+            params.append(language)
+
+        # Topics filter (any match)
+        if topics:
+            for topic in topics:
+                where_clauses.append("%s = ANY(r.topics)")
+                params.append(topic)
+
+        # Domains filter (any match)
+        if domains:
+            for domain in domains:
+                where_clauses.append("%s = ANY(r.domains)")
+                params.append(domain)
+
+        # Stars range
+        if min_stars is not None:
+            where_clauses.append("r.stars >= %s")
+            params.append(min_stars)
+        if max_stars is not None:
+            where_clauses.append("r.stars <= %s")
+            params.append(max_stars)
+
+        # Boolean filters
+        if tracked is not None:
+            where_clauses.append("r.tracked = %s")
+            params.append(tracked)
+        if surfaced is not None:
+            where_clauses.append("r.surfaced = %s")
+            params.append(surfaced)
+        if has_cluster is not None:
+            where_clauses.append("r.cluster_id IS NOT NULL" if has_cluster else "r.cluster_id IS NULL")
+        if has_map_position is not None:
+            where_clauses.append(
+                "(r.map_x IS NOT NULL AND r.map_y IS NOT NULL)"
+                if has_map_position
+                else "(r.map_x IS NULL OR r.map_y IS NULL)"
+            )
+
+        where_sql = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
+
+        # Valid sort fields
+        valid_sort = {
+            "id": "r.id",
+            "stars": "r.stars",
+            "forks": "r.forks",
+            "created_at": "r.created_at",
+            "pushed_at": "r.pushed_at",
+            "full_name": "r.full_name",
+        }
+        sort_field = valid_sort.get(sort.sort, "r.id")
+        order = "ASC" if sort.order.lower() == "asc" else "DESC"
+
+        # Total count
+        cur = self._db.execute(
+            f"SELECT COUNT(*) FROM repos r {where_sql}",
+            tuple(params),
+        )
+        total = cur.fetchone()[0]
+
+        # Paginated results
+        params.extend([pagination.limit, pagination.offset])
+        cur = self._db.execute(
+            f"""
+            SELECT
+                r.id, r.owner, r.name, r.full_name, r.description, r.topics,
+                r.language, r.license, r.homepage, r.archived, r.is_fork,
+                r.created_at, r.pushed_at, r.stars, r.forks, r.watchers, r.open_issues
+            FROM repos r
+            {where_sql}
+            ORDER BY {sort_field} {order}
+            LIMIT %s OFFSET %s
+            """,
+            tuple(params),
+        )
+        rows = cur.fetchall()
+
+        items = [
+            RepoBase(
+                id=row[0],
+                owner=row[1],
+                name=row[2],
+                full_name=row[3],
+                description=row[4],
+                topics=list(row[5] or []),
+                language=row[6],
+                license=row[7],
+                homepage=row[8],
+                archived=row[9],
+                is_fork=row[10],
+                created_at=row[11],
+                pushed_at=row[12],
+                stars=row[13],
+                forks=row[14],
+                watchers=row[15],
+                open_issues=row[16],
+            )
+            for row in rows
+        ]
+
+        total_pages = (total + pagination.per_page - 1) // pagination.per_page
+
+        return SearchResponse(
+            items=items,
+            page=pagination.page,
+            per_page=pagination.per_page,
+            total=total,
+            total_pages=total_pages,
+            query=q,
+        )
+
+    def get_trending(
+        self,
+        *,
+        pagination,
+        period: str,
+        language: str | None = None,
+        topic: str | None = None,
+        domain: str | None = None,
+        min_score: float | None = None,
+        surfaced_only: bool = False,
+    ):
+        """Get trending repositories by momentum score."""
+        from gitmaps.api.schemas import TrendingResponse, RepoBase
+
+        valid_periods = set(PERIOD_DAYS.keys())
+        if period not in valid_periods:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail=f"Invalid period. Must be one of {sorted(valid_periods)}")
+
+        where_clauses = ["ms.period = %s"]
+        params: list[Any] = [period]
+
+        if language:
+            where_clauses.append("r.language = %s")
+            params.append(language)
+        if topic:
+            where_clauses.append("%s = ANY(r.topics)")
+            params.append(topic)
+        if domain:
+            where_clauses.append("%s = ANY(r.domains)")
+            params.append(domain)
+        if min_score is not None:
+            where_clauses.append("ms.score >= %s")
+            params.append(min_score)
+        if surfaced_only:
+            where_clauses.append("r.surfaced = true")
+
+        where_sql = "WHERE " + " AND ".join(where_clauses)
+
+        # Total count
+        cur = self._db.execute(
+            f"""
+            SELECT COUNT(*)
+            FROM momentum_scores ms
+            JOIN repos r ON r.id = ms.repo_id
+            {where_sql}
+            """,
+            tuple(params),
+        )
+        total = cur.fetchone()[0]
+
+        # Paginated results with momentum score
+        params.extend([pagination.limit, pagination.offset])
+        cur = self._db.execute(
+            f"""
+            SELECT
+                r.id, r.owner, r.name, r.full_name, r.description, r.topics,
+                r.language, r.license, r.homepage, r.archived, r.is_fork,
+                r.created_at, r.pushed_at, r.stars, r.forks, r.watchers, r.open_issues,
+                ms.score, ms.decomposition
+            FROM momentum_scores ms
+            JOIN repos r ON r.id = ms.repo_id
+            {where_sql}
+            ORDER BY ms.score DESC NULLS LAST
+            LIMIT %s OFFSET %s
+            """,
+            tuple(params),
+        )
+        rows = cur.fetchall()
+
+        items = [
+            RepoBase(
+                id=row[0],
+                owner=row[1],
+                name=row[2],
+                full_name=row[3],
+                description=row[4],
+                topics=list(row[5] or []),
+                language=row[6],
+                license=row[7],
+                homepage=row[8],
+                archived=row[9],
+                is_fork=row[10],
+                created_at=row[11],
+                pushed_at=row[12],
+                stars=row[13],
+                forks=row[14],
+                watchers=row[15],
+                open_issues=row[16],
+            )
+            for row in rows
+        ]
+
+        total_pages = (total + pagination.per_page - 1) // pagination.per_page
+
+        return TrendingResponse(
+            items=items,
+            period=period,
+            page=pagination.page,
+            per_page=pagination.per_page,
+            total=total,
+            total_pages=total_pages,
+        )

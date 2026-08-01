@@ -159,6 +159,26 @@ def test_cluster_job_commits_and_reports(capsys) -> None:
     assert "cluster: seen=10 domains=1 clusters=2 assigned=10" in out.out
 
 
+def test_layout_job_commits_and_reports(capsys) -> None:
+    db = FakeDb()
+    # No stored layout version -> full pass. (None,) doubles for get_state
+    # ("no version recorded").
+    db.fetchone_result = (None,)
+    db.fetchall_result = [
+        (1001, 1, [1.0, 0.0, 0.0]),
+        (1002, 1, [0.95, 0.31, 0.0]),
+        (1003, 1, [0.99, 0.14, 0.0]),
+        (1004, 1, [0.93, 0.37, 0.0]),
+    ]
+
+    rc = main(["layout"], settings=settings(), db=db, client_factory=lambda s: FakeClient())
+
+    out = capsys.readouterr()
+    assert rc == 0
+    assert db.commits == 1
+    assert "layout: clusters=1 repos=4 full=True" in out.out
+
+
 def test_unknown_job_prints_usage(capsys) -> None:
     rc = main(["bogus"])
 

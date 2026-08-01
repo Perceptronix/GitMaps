@@ -165,6 +165,9 @@ class FakeStore:
         clustering_all: list[tuple] | None = None,
         clustering_due: list[tuple] | None = None,
         cluster_member_rows: list[tuple] | None = None,
+        layout_member_rows: list[tuple] | None = None,
+        layout_due: list[tuple] | None = None,
+        cluster_position_rows: list[tuple] | None = None,
     ) -> None:
         self.state: dict[str, Any] = dict(state or {})
         self.upserted: list[dict] = []
@@ -214,6 +217,12 @@ class FakeStore:
         self.cluster_member_rows: list[tuple] = list(cluster_member_rows or [])  # (cluster_id, domain, embedding)
         self.cluster_assignments: list[tuple[int, int, str]] = []  # (repo_id, cluster_id, clustered_at)
         self.cluster_touches: list[tuple[int, str]] = []  # (repo_id, clustered_at)
+        # layout pipeline
+        self.layout_member_rows: list[tuple] = list(layout_member_rows or [])  # (repo_id, cluster_id, embedding)
+        self.layout_due: list[tuple] = list(layout_due or [])  # (repo_id, cluster_id)
+        self.cluster_position_rows: list[tuple] = list(cluster_position_rows or [])  # (cluster_id, x, y)
+        self.cluster_positions_written: list[tuple[int, float, float]] = []  # (cluster_id, x, y)
+        self.repo_positions_written: list[tuple[int, float, float]] = []  # (x, y, repo_id)
 
     def upsert(self, repo: dict) -> int:
         self.upserted.append(repo)
@@ -373,6 +382,227 @@ class FakeStore:
 
     def touch_clustered_at(self, repo_id: int, clustered_at: str) -> None:
         self.cluster_touches.append((repo_id, clustered_at))
+
+    # -- layout pipeline (Phase 8) ------------------------------------------
+
+    def list_layout_members(self) -> list[tuple]:
+        return list(self.layout_member_rows)
+
+    def set_cluster_position(self, cluster_id: int, x: float, y: float) -> None:
+        self.cluster_positions_written.append((cluster_id, x, y))
+
+    def list_cluster_positions(self) -> list[tuple]:
+        # Return in format: (id, domain, label, centroid_x, centroid_y)
+        result = []
+        for c in self.cluster_position_rows:
+            if len(c) == 3:
+                # Old format: (id, x, y)
+                result.append((c[0], "Unknown", f"Cluster {c[0]}", c[1], c[2]))
+            elif len(c) == 5:
+                # New format: (id, domain, label, x, y)
+                result.append((c[0], c[1], c[2], c[3], c[4]))
+        return result
+
+    def list_due_layout(self) -> list[tuple]:
+        return list(self.layout_due)
+
+    def list_repo_positions(self, limit: int, offset: int) -> list[tuple]:
+        """Get paginated repository map positions."""
+        # FakeStore doesn't store individual repo positions, so we derive from layout_member_rows
+        # Filter for those that would have positions (those with cluster positions)
+        result = []
+        for repo_id, cluster_id, embedding in self.layout_member_rows:
+            # Check if this cluster has a position
+            has_position = any(c[0] == cluster_id for c in self.cluster_position_rows)
+            if has_position:
+                # Use the cluster position as the repo position (simplified)
+                for c in self.cluster_position_rows:
+                    if c[0] == cluster_id:
+                        # Handle both old (3-tuple) and new (5-tuple) format
+                        if len(c) == 3:
+                            x, y = c[1], c[2]
+                        else:
+                            x, y = c[3], c[4]
+                        result.append((repo_id, x, y))
+                        break
+        return result[offset:offset + limit]
+
+    def count_repo_positions(self) -> int:
+        """Get total count of repositories with map positions."""
+        count = 0
+        for repo_id, cluster_id, embedding in self.layout_member_rows:
+            if any(c[0] == cluster_id for c in self.cluster_position_rows):
+                count += 1
+        return count
+
+    def set_repo_positions(self, rows: list[tuple]) -> None:
+        """Bulk-write map_x/map_y for repo ids."""
+        self.repo_positions_written.extend(rows)
+
+    def get_state(self, key: str):
+        """Get state value."""
+        return self.state.get(key)
+
+    def get_repo_by_id(self, repo_id: int):
+        """Get repo by ID for FakeStore."""
+        # Return a fake repo with embedding for testing
+        if repo_id == 999999:
+            return None
+        return {"full_name": f"owner/repo{repo_id}", "embedding": [0.1, 0.2, 0.3]}
+
+    def get_repo_detail(self, repo_id: int):
+        """Get repo detail for FakeStore."""
+        if repo_id == 999999:
+            return None
+        return {
+            "id": repo_id,
+            "owner": "test",
+            "name": f"repo{repo_id}",
+            "full_name": f"test/repo{repo_id}",
+            "description": "Test repo",
+            "topics": [],
+            "language": "Python",
+            "license": "MIT",
+            "homepage": None,
+            "archived": False,
+            "is_fork": False,
+            "created_at": None,
+            "pushed_at": None,
+            "stars": 100,
+            "forks": 10,
+            "watchers": 5,
+            "open_issues": 2,
+            "tracked": True,
+            "surfaced": True,
+            "surfaced_at": None,
+            "significance_score": 0.8,
+            "significance_vars": {},
+            "domains": ["AI"],
+            "domains_fingerprint": "abc123",
+            "classified_at": None,
+            "embedding_fingerprint": "def456",
+            "embedded_at": None,
+            "cluster_id": 1,
+            "clustered_at": None,
+            "map_x": 0.5,
+            "map_y": 0.5,
+            "momentum": None,
+        }
+
+    def list_clusters(self, *, pagination, sort, domain: str | None = None):
+        """List clusters with pagination, sorting, and filtering for FakeStore."""
+        from gitmaps.api.schemas import ClustersResponse, ClusterSummary
+
+        items = []
+        for c in self.cluster_position_rows:
+            # Handle both old (id, x, y) and new (id, domain, label, x, y) format
+            if len(c) == 3:
+                # Old format
+                cluster_id, x, y = c
+                domain_val = "Unknown"
+                label = f"Cluster {cluster_id}"
+            elif len(c) == 5:
+                # New format
+                cluster_id, domain_val, label, x, y = c
+            else:
+                continue
+
+            if domain and domain_val != domain:
+                continue
+            items.append(ClusterSummary(
+                id=cluster_id,
+                domain=domain_val,
+                label=label,
+                member_count=3,
+                centroid_x=x,
+                centroid_y=y,
+                computed_at=None,
+            ))
+
+        # Sort
+        valid_sort = {"id": "id", "domain": "domain", "label": "label", "member_count": "member_count", "computed_at": "computed_at"}
+        sort_field = valid_sort.get(sort.sort, "id")
+        reverse = sort.order.lower() == "desc"
+
+        # Sort items
+        if sort_field == "id":
+            items.sort(key=lambda x: x.id, reverse=reverse)
+        elif sort_field == "domain":
+            items.sort(key=lambda x: x.domain, reverse=reverse)
+        elif sort_field == "label":
+            items.sort(key=lambda x: x.label, reverse=reverse)
+        elif sort_field == "member_count":
+            items.sort(key=lambda x: x.member_count, reverse=reverse)
+        elif sort_field == "computed_at":
+            items.sort(key=lambda x: x.computed_at or "", reverse=reverse)
+
+        total = len(items)
+        per_page = pagination.per_page
+        offset = pagination.offset
+        page = pagination.page
+
+        paginated_items = items[offset:offset + per_page]
+        total_pages = (total + per_page - 1) // per_page
+
+        return ClustersResponse(
+            items=paginated_items,
+            page=page,
+            per_page=per_page,
+            total=total,
+            total_pages=total_pages,
+        )
+
+    def search_repos(
+        self,
+        *,
+        pagination,
+        sort,
+        q: str | None = None,
+        language: str | None = None,
+        topics: list[str] | None = None,
+        domains: list[str] | None = None,
+        min_stars: int | None = None,
+        max_stars: int | None = None,
+        tracked: bool | None = None,
+        surfaced: bool | None = None,
+        has_cluster: bool | None = None,
+        has_map_position: bool | None = None,
+    ):
+        """Search repositories for FakeStore."""
+        from gitmaps.api.schemas import SearchResponse, RepoBase
+
+        # FakeStore doesn't have real repos - return empty results
+        return SearchResponse(
+            items=[],
+            page=pagination.page,
+            per_page=pagination.per_page,
+            total=0,
+            total_pages=0,
+            query=q,
+        )
+
+    def get_trending(
+        self,
+        *,
+        pagination,
+        period: str,
+        language: str | None = None,
+        topic: str | None = None,
+        domain: str | None = None,
+        min_score: float | None = None,
+        surfaced_only: bool = False,
+    ):
+        """Get trending repositories for FakeStore."""
+        from gitmaps.api.schemas import TrendingResponse, RepoBase
+
+        return TrendingResponse(
+            items=[],
+            period=period,
+            page=pagination.page,
+            per_page=pagination.per_page,
+            total=0,
+            total_pages=0,
+        )
 
 
 def fixed_clock(epoch: float) -> tuple[Callable[[], float], list[float]]:

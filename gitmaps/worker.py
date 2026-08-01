@@ -8,6 +8,7 @@
     python -m gitmaps.worker embed
     python -m gitmaps.worker classify
     python -m gitmaps.worker cluster
+    python -m gitmaps.worker layout
 
 Every job runs inside a transaction that COMMITS on success and ROLLS BACK on
 failure (architecture D-10 single-writer, and the fix for the collector's
@@ -28,12 +29,13 @@ from gitmaps.config import Settings
 from gitmaps.db import Db
 from gitmaps.embeddings import EmbeddingRunner, build_embedding_provider
 from gitmaps.github.client import GitHubClient
+from gitmaps.layout import LayoutRunner
 from gitmaps.momentum import MomentumConfig, MomentumRunner
 from gitmaps.promotion import GateConfig, PromotionRunner
 from gitmaps.repo_store import RepoStore
 from gitmaps.snapshotter import SnapshotRunner
 
-JOBS = ("discover", "snapshot_core", "snapshot_deep", "promote", "momentum", "embed", "classify", "cluster")
+JOBS = ("discover", "snapshot_core", "snapshot_deep", "promote", "momentum", "embed", "classify", "cluster", "layout")
 
 
 def run_job(job: str, settings: Settings, store: RepoStore, client_factory: Callable[[Settings], object]) -> str:
@@ -89,6 +91,12 @@ def run_job(job: str, settings: Settings, store: RepoStore, client_factory: Call
             f"domains={clustering_result.domains_clustered} "
             f"clusters={clustering_result.clusters_created} "
             f"assigned={clustering_result.repos_assigned}"
+        )
+    if job == "layout":
+        layout_result = LayoutRunner(store).run()
+        return (
+            f"layout: clusters={layout_result.clusters_placed} "
+            f"repos={layout_result.repos_placed} full={layout_result.force_full}"
         )
     runner = SnapshotRunner(client, store, budget_per_hour=settings.rate_budget_per_hour)
     if job == "snapshot_core":
