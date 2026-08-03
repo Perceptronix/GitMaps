@@ -20,10 +20,7 @@ from gitmaps.api.deps import get_db, get_settings
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan - startup and shutdown."""
-    # Startup: ensure DB connection works
-    db = get_db()
-    with db:
-        db.execute("SELECT 1")
+    # Startup: do nothing, DB connections are lazy
     yield
     # Shutdown: close DB connection
     from gitmaps.api.deps import _db as db_instance
