@@ -6,6 +6,27 @@ junk (forks, archives), upsert the survivors into `repos`, and record the
 run's progress in `ingestion_state` so the next run continues from where this
 one stopped. Storage and HTTP live behind injected seams (client, store) so
 this orchestration is unit-testable without network or database.
+
+Discovery sweeps
+----------------
+GitHub stops paginating a single search query at 1,000 results, so one
+`created:>=since` query caps the whole run at a thousand new repos. To reach
+the long tail, `run()` issues a *family* of narrower queries and merges the
+results:
+
+  * **baseline** — `created:>=since` (the original sweep; catches anything
+    the narrower queries miss)
+  * **per-language** — `created:>=since language:<lang>` for the top 15
+    languages, so a hot week in a single language can't crowd the rest out
+  * **per-topic** — `created:>=since topic:<slug>` for each classification
+    taxonomy domain (slugged from ``DEFAULT_TAXONOMY``), so taxonomy-retuned
+    domains widen discovery automatically
+  * **star-crossing** — `stars:5..50 pushed:>=since`, repos created before
+    the watermark but pushed recently with modest stars — the rising long
+    tail a created-only sweep never sees
+
+The sweeps overlap heavily (a Python AI repo appears in three of them), so
+results are deduped by repo id before screening.
 """
 
 from __future__ import annotations
@@ -13,7 +34,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Callable
+from typing import Callable, Sequence
 
 from gitmaps.github.client import GitHubApiError, RateLimitError
 from gitmaps.github.graphql_client import GraphQLBatchClient
@@ -28,14 +49,43 @@ LAST_COUNT_KEY = "discovery.last_count"
 #: Default look-back when no watermark exists yet (first run).
 DEFAULT_WINDOW_DAYS = 7
 
+#: Per-language sweeps — the top GitHub languages by repository volume.
+#: Each query still caps at 1000, but the union of languages clears far more
+#: of a busy week than one blanket query.
+DEFAULT_LANGUAGES = (
+    "python", "typescript", "javascript", "go", "rust", "java",
+    "c++", "c", "csharp", "ruby", "php", "swift", "kotlin", "shell", "html",
+)
+
+
+def taxonomy_topic_slugs() -> tuple[str, ...]:
+    """One GitHub topic per classification taxonomy domain.
+
+    Slugged from ``DEFAULT_TAXONOMY`` (lowercased, spaces → hyphens) so a
+    taxonomy retune widens discovery in lockstep: "AI Agents" → ``topic:ai-agents``,
+    "RAG" → ``topic:rag``, "DevOps" → ``topic:devops``. Imported lazily to keep
+    collector's import graph light (the taxonomy drags the classifier with it).
+    """
+    from gitmaps.classification import DEFAULT_TAXONOMY
+
+    return tuple(domain.lower().replace(" ", "-") for domain, _ in DEFAULT_TAXONOMY)
+
+
+@dataclass(frozen=True)
+class SweepResult:
+    """Raw yield of one discovery sweep query (before cross-sweep dedupe)."""
+
+    query: str
+    hits: int
+
 
 @dataclass(frozen=True)
 class DiscoveryResult:
     """Outcome of one discovery run."""
 
-    query: str
     since: str
-    found: int
+    sweeps: tuple[SweepResult, ...]
+    found: int  # unique repos after cross-sweep dedupe
     stored: int
     dropped: int
 
@@ -49,24 +99,39 @@ class DiscoveryRunner:
         graphql: GraphQLBatchClient | None = None,
         now: Callable[[], datetime] | None = None,
         default_window_days: int = DEFAULT_WINDOW_DAYS,
+        languages: Sequence[str] | None = None,
+        topics: Sequence[str] | None = None,
     ) -> None:
         self._client = client
         self._store = store
         self._graphql = graphql
         self._now = now or (lambda: datetime.now(timezone.utc))
         self._window_days = default_window_days
+        self._languages = tuple(languages) if languages is not None else DEFAULT_LANGUAGES
+        self._topics = tuple(topics) if topics is not None else taxonomy_topic_slugs()
 
     def run(self) -> DiscoveryResult:
         run_start = utc_stamp(self._now())
         since = self._store.get_state(SINCE_KEY) or utc_stamp(
             self._now() - timedelta(days=self._window_days)
         )
-        query = f"created:>={since}"
+        queries = self._build_queries(since)
+
+        # Merge every sweep, deduped by repo id — the same repo legitimately
+        # shows up in the baseline, its language, and its topic sweeps.
+        by_id: dict[int, dict] = {}
+        sweeps: list[SweepResult] = []
+        for query in queries:
+            hits = 0
+            for repo in self._client.search(query):
+                hits += 1
+                by_id.setdefault(repo["id"], repo)
+            sweeps.append(SweepResult(query=query, hits=hits))
 
         found = 0
         dropped = 0
         screened: list[dict] = []
-        for repo in self._client.search(query):
+        for repo in by_id.values():
             found += 1
             if self._is_junk(repo):
                 dropped += 1
@@ -82,7 +147,7 @@ class DiscoveryRunner:
         self._store.set_state(LAST_RUN_KEY, run_start)
         self._store.set_state(LAST_COUNT_KEY, stored)
 
-        return DiscoveryResult(query=query, since=since, found=found, stored=stored, dropped=dropped)
+        return DiscoveryResult(since=since, sweeps=tuple(sweeps), found=found, stored=stored, dropped=dropped)
 
     def _enrich(self, screened: list[dict]) -> list[dict]:
         """Batch-fetch richer metadata for the screened repos via GraphQL.
@@ -107,6 +172,15 @@ class DiscoveryRunner:
             return screened
         enriched = {rd.full_name: rd.as_rest_dict() for rd in fetched if rd is not None}
         return [enriched.get(r["full_name"], r) for r in screened]
+
+    def _build_queries(self, since: str) -> list[str]:
+        queries = [f"created:>={since}"]
+        queries += [f"created:>={since} language:{lang}" for lang in self._languages]
+        queries += [f"created:>={since} topic:{topic}" for topic in self._topics]
+        # Repos created before the watermark but pushed recently with modest
+        # stars — the "rising long tail" a created-only sweep never sees.
+        queries.append(f"stars:5..50 pushed:>={since}")
+        return queries
 
     @staticmethod
     def _is_junk(repo: dict) -> bool:

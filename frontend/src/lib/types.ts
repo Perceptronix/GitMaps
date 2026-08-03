@@ -109,6 +109,8 @@ export interface RepoMapPosition {
 export interface MapResponse {
   clusters: ClusterPosition[];
   repos: RepoMapPosition[];
+  /** Total repos with a map position (what discovery/surfacing produced). */
+  total: number;
   updated_at: string | null;
 }
 

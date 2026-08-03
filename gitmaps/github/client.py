@@ -350,15 +350,27 @@ class GitHubClient(TokenPoolMixin):
         per_page: int = 100,
         max_results: int = MAX_SEARCH_RESULTS,
     ) -> Iterator[dict]:
-        """Yield search-repository items, stopping at an empty page or max_results."""
+        """Yield search-repository items, stopping at an empty page or max_results.
+
+        GitHub's search API caps pagination at 1,000 results and 422s any page
+        past that. Search results are also pagination-unstable (repos churn
+        between page requests), so a page can come back partial and the loop
+        would otherwise walk into the cap. The 422 is therefore end-of-results,
+        not an error — yield what we have and stop.
+        """
         page = 1
         fetched = 0
         while fetched < max_results:
-            resp = self._request(
-                "GET",
-                "/search/repositories",
-                params={"q": query, "per_page": per_page, "page": page},
-            )
+            try:
+                resp = self._request(
+                    "GET",
+                    "/search/repositories",
+                    params={"q": query, "per_page": per_page, "page": page},
+                )
+            except GitHubApiError as exc:
+                if exc.status_code == 422 and "first 1000 search results" in str(exc):
+                    return  # reached GitHub's hard cap on this query
+                raise
             items = resp.json().get("items") or []
             if not items:
                 return

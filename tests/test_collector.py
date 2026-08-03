@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 
 from gitmaps.github.client import GitHubApiError
 from gitmaps.github.graphql_client import RepoData
-from gitmaps.collector import DiscoveryRunner
+from gitmaps.collector import DEFAULT_LANGUAGES, DiscoveryRunner, taxonomy_topic_slugs
 
 from conftest import FakeClient, FakeGraphQL, FakeStore, make_repo
 
@@ -29,8 +29,9 @@ def test_first_run_uses_default_window_and_advances_since() -> None:
 
     result = runner.run()
 
-    # default window = 7 days before the injected "now"
-    assert result.query == "created:>=2026-07-24T12:00:00Z"
+    # default window = 7 days before the injected "now"; the baseline sweep
+    # (all languages) is first in the sweep family
+    assert result.sweeps[0].query == "created:>=2026-07-24T12:00:00Z"
     assert result.found == 2
     assert result.stored == 2
     assert result.dropped == 0
@@ -47,7 +48,7 @@ def test_uses_existing_watermark() -> None:
 
     result = runner.run()
 
-    assert result.query == "created:>=2026-07-01T00:00:00Z"
+    assert result.sweeps[0].query == "created:>=2026-07-01T00:00:00Z"
 
 
 def test_screens_out_forks_and_archived() -> None:
@@ -98,6 +99,42 @@ def test_result_reports_since_and_counts() -> None:
 
     assert result.since == "2026-07-24T12:00:00Z"
     assert result.stored == 1
+
+
+def test_issues_sweep_family_and_dedupes_across_sweeps() -> None:
+    # The fake yields the same two repos for every query, so a correct runner
+    # merges them by id into exactly two unique repos — one upsert each.
+    client = FakeClient([make_repo(), make_repo(id=1002)])
+    runner, store = make_runner(client)
+
+    result = runner.run()
+
+    queries = [s.query for s in result.sweeps]
+    since = "2026-07-24T12:00:00Z"
+    # baseline + one per language + one per taxonomy topic + star-crossing
+    assert queries[0] == f"created:>={since}"
+    assert f"created:>={since} language:python" in queries
+    assert f"created:>={since} language:c++" in queries
+    assert f"created:>={since} topic:ai-agents" in queries  # slugged from DEFAULT_TAXONOMY
+    assert f"created:>={since} topic:devops" in queries
+    assert queries[-1] == f"stars:5..50 pushed:>={since}"
+    assert len(queries) == 1 + len(DEFAULT_LANGUAGES) + len(taxonomy_topic_slugs()) + 1
+
+    # Cross-sweep dedupe: the same two repos appeared in ~33 sweeps but were
+    # merged into two unique findings, and each was upserted once.
+    assert result.found == 2
+    assert [r["id"] for r in store.upserted] == [1001, 1002]
+
+
+def test_sweep_hits_are_reported_per_query() -> None:
+    client = FakeClient([make_repo(), make_repo(id=1002)])
+    runner, _ = make_runner(client)
+
+    result = runner.run()
+
+    # every sweep saw the same two fake repos
+    assert len(result.sweeps) > 30  # baseline + 15 languages + 15 topics + star-crossing
+    assert all(s.hits == 2 for s in result.sweeps)
 
 
 # ---------------------------------------------------------------------------

@@ -22,6 +22,7 @@ const fetcher = (url: string) => fetch(url).then(res => res.json());
 
 export default function HomePage() {
   const [view, setView] = useState<'map' | 'search' | 'trending'>('map');
+  const [searchQuery, setSearchQuery] = useState('');
   const [selectedRepo, setSelectedRepo] = useState<RepoData | null>(null);
   const [hoveredRepo, setHoveredRepo] = useState<{ id: number; x: number; y: number } | null>(null);
   const [filterDomains, setFilterDomains] = useState<string[]>([]);
@@ -31,7 +32,16 @@ export default function HomePage() {
   const { data: mapData, error: mapError, mutate: mutateMap } = useSWR<MapResponse>(
     '/api/backend/map',
     fetcher,
-    { revalidateOnFocus: false }
+    {
+      revalidateOnFocus: false,
+      // Diagnostics: real data counts straight off the /map response. If
+      // repos is far below total, the backend hasn't surfaced many repos yet.
+      onSuccess: (data) => {
+        console.log(
+          `[map] ${data.clusters.length} clusters · ${data.repos.length} repos of ${data.total} positioned`,
+        );
+      },
+    }
   );
 
   // Fetch domains for filter
@@ -61,6 +71,11 @@ export default function HomePage() {
 
   const handleRepoHover = useCallback((repo: { id: number; x: number; y: number } | null) => {
     setHoveredRepo(repo);
+  }, []);
+
+  const handleMapSearch = useCallback((query: string) => {
+    setSearchQuery(query);
+    setView('search');
   }, []);
 
   if (mapError) {
@@ -98,11 +113,12 @@ export default function HomePage() {
               hoveredRepo={hoveredRepo}
               filterDomains={filterDomains}
               filterClusters={filterClusters}
+              onSearch={handleMapSearch}
             />
           </>
         )}
 
-        {view === 'search' && <SearchPanel onRepoClick={handleRepoClick} />}
+        {view === 'search' && <SearchPanel onRepoClick={handleRepoClick} initialQuery={searchQuery} />}
         {view === 'trending' && <TrendingView onRepoClick={handleRepoClick} />}
 
         {selectedRepo && (

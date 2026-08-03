@@ -53,13 +53,20 @@ def run_job(
         # fallback when the GraphQL path fails. Optional so tests stay hermetic.
         graphql = graphql_factory(settings) if graphql_factory is not None else None
         discovery = DiscoveryRunner(client, store, graphql=graphql).run()
-        return f"discover: found={discovery.found} stored={discovery.stored} dropped={discovery.dropped}"
+        return (
+            f"discover: found={discovery.found} stored={discovery.stored} "
+            f"dropped={discovery.dropped} sweeps={len(discovery.sweeps)}"
+        )
     if job == "promote":
         promoter = PromotionRunner(store, config=GateConfig(threshold=settings.significance_threshold))
         promo_result = promoter.run()
+        # The candidates→surfaced funnel: how many repos the significance gate
+        # saw (surfaced_candidates) vs how many it actually surfaced. A tiny
+        # ratio here means the gate is over-filtering, not the discovery sweep.
         return (
             f"promote: candidates={promo_result.candidates} tracked={promo_result.promoted_tracked} "
-            f"surfaced={promo_result.promoted_surfaced}"
+            f"surfaced_candidates={promo_result.surfaced_candidates} "
+            f"promoted_surfaced={promo_result.promoted_surfaced}"
         )
     if job == "momentum":
         momentum = MomentumRunner(

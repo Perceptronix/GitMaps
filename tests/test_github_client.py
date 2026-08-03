@@ -202,6 +202,27 @@ def test_search_stops_at_total_count() -> None:
     assert len(session.calls) == 2
 
 
+def test_search_stops_gracefully_at_github_1000_cap() -> None:
+    # A query that matches >1000 results 422s once pagination walks past the
+    # cap (GitHub search results are pagination-unstable, so a page can come
+    # back partial and the loop would otherwise request page 11). The 422 is
+    # end-of-results: yield what we have and stop, never raise.
+    session = FakeSession()
+    session.responses.append(FakeResponse(json_body={"total_count": 2000, "items": [make_repo(), make_repo()]}))
+    session.responses.append(
+        FakeResponse(
+            status_code=422,
+            json_body={"message": "Only the first 1000 search results are available"},
+        )
+    )
+    client = make_client(session)
+
+    results = list(client.search("created:>=2026-07-01", per_page=2, max_results=1000))
+
+    assert len(results) == 2
+    assert len(session.calls) == 2  # page 2 hit the cap; no page 3 attempted
+
+
 def test_get_readme_returns_raw_text() -> None:
     session = FakeSession()
     session.responses.append(FakeResponse(text="# Hello"))

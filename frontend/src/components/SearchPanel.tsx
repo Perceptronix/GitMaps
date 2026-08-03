@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import useSWR from 'swr';
 import { Search, Filter, X, Loader2, ChevronDown } from 'lucide-react';
 import type { SearchResponse, RepoBase } from '@/lib/types';
@@ -8,12 +8,14 @@ import { api } from '@/lib/api';
 
 interface SearchPanelProps {
   onRepoClick: (repoId: number) => void;
+  /** Query carried over from the map's search bar, if any. */
+  initialQuery?: string;
 }
 
 const fetcher = (url: string) => fetch(url).then(res => res.json());
 
-export function SearchPanel({ onRepoClick }: SearchPanelProps) {
-  const [query, setQuery] = useState('');
+export function SearchPanel({ onRepoClick, initialQuery }: SearchPanelProps) {
+  const [query, setQuery] = useState(initialQuery ?? '');
   const [language, setLanguage] = useState('');
   const [topics, setTopics] = useState<string[]>([]);
   const [domains, setDomains] = useState<string[]>([]);
@@ -28,6 +30,18 @@ export function SearchPanel({ onRepoClick }: SearchPanelProps) {
   const [sort, setSort] = useState('stars');
   const [order, setOrder] = useState<'asc' | 'desc'>('desc');
   const [showAdvanced, setShowAdvanced] = useState(false);
+
+  // Any change to the search identity (query, filters, page size, sort) starts
+  // a brand-new search — always from page 1. Without this, filtering while on
+  // page 3 keeps the URL at page=3, which lands on an empty/dead page once the
+  // narrowed results have fewer pages.
+  const searchIdentity = JSON.stringify([
+    query, language, topics, domains, minStars, maxStars,
+    tracked, surfaced, hasCluster, hasMapPosition, perPage, sort, order,
+  ]);
+  useEffect(() => {
+    setPage(1);
+  }, [searchIdentity]);
 
   const params = new URLSearchParams();
   if (query) params.append('q', query);
@@ -248,28 +262,6 @@ export function SearchPanel({ onRepoClick }: SearchPanelProps) {
               </div>
             )}
 
-            {/* Pagination */}
-            {data.total_pages > 1 && (
-              <div className="mt-6 flex items-center justify-center gap-2">
-                <button
-                  onClick={() => setPage(p => Math.max(1, p - 1))}
-                  disabled={page === 1}
-                  className="px-3 py-2 rounded-lg border border-border text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-secondary transition-colors"
-                >
-                  Previous
-                </button>
-                <span className="px-3 py-2 text-sm text-muted-foreground">
-                  Page {data.page} of {data.total_pages}
-                </span>
-                <button
-                  onClick={() => setPage(p => Math.min(data.total_pages, p + 1))}
-                  disabled={page === data.total_pages}
-                  className="px-3 py-2 rounded-lg border border-border text-sm disabled:opacity-50 disabled:cursor-not-allowed hover:bg-secondary transition-colors"
-                >
-                  Next
-                </button>
-              </div>
-            )}
           </>
         )}
 
@@ -281,6 +273,35 @@ export function SearchPanel({ onRepoClick }: SearchPanelProps) {
           </div>
         )}
       </div>
+
+      {/* Pagination — pinned footer, always visible regardless of how long the
+          result list is. Buttons key off the response's own page numbers so the
+          disabled/hover state always matches what's on screen. */}
+      {data && data.total_pages > 1 && (
+        <div className="flex items-center justify-center gap-2 border-t border-border px-4 py-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => setPage(data.page - 1)}
+            disabled={data.page <= 1}
+            aria-label="Previous page"
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border border-border bg-secondary text-foreground transition-colors hover:bg-secondary/80 hover:border-muted-foreground/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-secondary"
+          >
+            Previous
+          </button>
+          <span className="px-3 py-1.5 text-sm text-muted-foreground" aria-current="page">
+            Page {data.page} of {data.total_pages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage(data.page + 1)}
+            disabled={data.page >= data.total_pages}
+            aria-label="Next page"
+            className="px-3 py-1.5 rounded-lg text-sm font-medium border border-border bg-secondary text-foreground transition-colors hover:bg-secondary/80 hover:border-muted-foreground/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-secondary"
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -81,7 +81,7 @@ class ClusteringConfig:
     tuning change triggers a full recompute (see `clustering_version`).
     """
 
-    min_cluster_size: int = 5
+    min_cluster_size: int = 3
     min_samples: int | None = None  # None -> sklearn uses min_cluster_size
     cluster_selection_epsilon: float = 0.0
     similarity_threshold: float = 0.75  # incremental nearest-centroid floor

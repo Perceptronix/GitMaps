@@ -86,6 +86,7 @@ def test_get_map(client: TestClient, store: FakeStore) -> None:
     data = response.json()
     assert "clusters" in data
     assert "repos" in data
+    assert "total" in data
     assert len(data["clusters"]) == 2
     assert data["clusters"][0]["cluster_id"] == 1
     assert data["clusters"][0]["x"] == 0.5

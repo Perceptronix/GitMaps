@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 from fastapi import APIRouter, Depends
 
-from gitmaps.api.deps import PaginationDep, StoreDep
+from gitmaps.api.deps import StoreDep
 from gitmaps.api.schemas import MapResponse, ClusterPosition, RepoMapPosition
 from gitmaps.repo_store import RepoStore
 
@@ -20,12 +20,12 @@ router = APIRouter()
 )
 async def get_map(
     store: StoreDep,
-    pagination: PaginationDep,
 ) -> MapResponse:
     """Get the full semantic map data.
 
-    Returns cluster centroids and all repository positions. Supports pagination
-    for repositories (clusters are typically small enough to return all).
+    Returns every cluster centroid and every positioned repository. The map is
+    a whole-universe visualization, so repos are deliberately not paginated —
+    a LIMIT would silently truncate the map to the first page.
     """
     # Get all cluster positions using store method
     cluster_rows = store.list_cluster_positions()
@@ -41,8 +41,8 @@ async def get_map(
         for row in cluster_rows
     ]
 
-    # Get paginated repo positions using store method
-    repo_rows = store.list_repo_positions(pagination.limit, pagination.offset)
+    # Get every positioned repo (no LIMIT — see docstring above)
+    repo_rows = store.list_all_repo_positions()
     repos = [
         RepoMapPosition(
             repo_id=row[0],
@@ -57,8 +57,8 @@ async def get_map(
         for row in repo_rows
     ]
 
-    # Get total count
-    total_repos = store.count_repo_positions()
+    # Total positioned repos — what discovery/surfacing actually produced
+    total_repos = len(repo_rows)
 
     # Get the latest layout run timestamp
     updated_at = store.get_state("layout.last_run_at")
@@ -66,5 +66,6 @@ async def get_map(
     return MapResponse(
         clusters=clusters,
         repos=repos,
+        total=total_repos,
         updated_at=updated_at,
     )

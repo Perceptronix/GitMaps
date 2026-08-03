@@ -887,6 +887,24 @@ class RepoStore:
         )
         return [tuple(row) for row in cur.fetchall()]
 
+    def list_all_repo_positions(self) -> list[tuple]:
+        """Get every repository map position.
+
+        The semantic map renders the whole universe of positioned repos; a
+        LIMIT here silently truncates the visualization to the first page.
+        """
+        cur = self._db.execute(
+            """
+            SELECT r.id, r.map_x, map_y, r.cluster_id, r.stars, r.owner, r.name,
+                   c.domain
+            FROM repos r
+            LEFT JOIN clusters c ON r.cluster_id = c.id
+            WHERE r.map_x IS NOT NULL AND r.map_y IS NOT NULL
+            ORDER BY r.id
+            """
+        )
+        return [tuple(row) for row in cur.fetchall()]
+
     def count_repo_positions(self) -> int:
         """Get total count of repositories with map positions."""
         cur = self._db.execute(

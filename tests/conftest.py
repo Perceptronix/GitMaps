@@ -394,15 +394,15 @@ class FakeStore:
         self.cluster_positions_written.append((cluster_id, x, y))
 
     def list_cluster_positions(self) -> list[tuple]:
-        # Return in format: (id, domain, label, centroid_x, centroid_y)
+        # Real store contract: (id, domain, label, member_count, centroid_x, centroid_y)
         result = []
         for c in self.cluster_position_rows:
             if len(c) == 3:
                 # Old format: (id, x, y)
-                result.append((c[0], "Unknown", f"Cluster {c[0]}", c[1], c[2]))
+                result.append((c[0], "Unknown", f"Cluster {c[0]}", 3, c[1], c[2]))
             elif len(c) == 5:
-                # New format: (id, domain, label, x, y)
-                result.append((c[0], c[1], c[2], c[3], c[4]))
+                # (id, domain, label, x, y) — add a member_count column
+                result.append((c[0], c[1], c[2], 3, c[3], c[4]))
         return result
 
     def list_due_layout(self) -> list[tuple]:
@@ -410,8 +410,9 @@ class FakeStore:
 
     def list_repo_positions(self, limit: int, offset: int) -> list[tuple]:
         """Get paginated repository map positions."""
-        # FakeStore doesn't store individual repo positions, so we derive from layout_member_rows
-        # Filter for those that would have positions (those with cluster positions)
+        # FakeStore doesn't store individual repo positions, so we derive from
+        # layout_member_rows, matching the real store's 8-column contract:
+        # (repo_id, x, y, cluster_id, stars, owner, name, domain)
         result = []
         for repo_id, cluster_id, embedding in self.layout_member_rows:
             # Check if this cluster has a position
@@ -425,9 +426,13 @@ class FakeStore:
                             x, y = c[1], c[2]
                         else:
                             x, y = c[3], c[4]
-                        result.append((repo_id, x, y))
+                        result.append((repo_id, x, y, cluster_id, 0, "", "", "Unknown"))
                         break
         return result[offset:offset + limit]
+
+    def list_all_repo_positions(self) -> list[tuple]:
+        """All repository map positions (the map renders every positioned repo)."""
+        return self.list_repo_positions(limit=10_000_000, offset=0)
 
     def count_repo_positions(self) -> int:
         """Get total count of repositories with map positions."""

@@ -246,7 +246,7 @@ class LayoutRunner:
         # numeric columns come back as Decimal — normalize to float for arithmetic.
         centroid_by_cluster = {
             cluster_id: (float(x), float(y))
-            for cluster_id, domain, label, x, y in self._store.list_cluster_positions()
+            for cluster_id, domain, label, member_count, x, y in self._store.list_cluster_positions()
         }
         rows: list[tuple] = []
         for repo_id, cluster_id in self._store.list_due_layout():

@@ -85,7 +85,7 @@ def test_promote_job_commits_and_reports(capsys) -> None:
     out = capsys.readouterr()
     assert rc == 0
     assert db.commits == 1
-    assert "tracked=1 surfaced=1" in out.out
+    assert "tracked=1 surfaced_candidates=1 promoted_surfaced=1" in out.out
     # the gate result is persisted to the row (repos.significance_score/vars)
     significance_updates = [sql for sql, _ in db.executed if "significance_score" in sql]
     assert len(significance_updates) == 1

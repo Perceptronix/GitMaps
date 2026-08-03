@@ -60,6 +60,7 @@ class MapResponse(BaseModel):
 
     clusters: list[ClusterPosition]
     repos: list[RepoMapPosition]
+    total: int = 0  # repos with a map position (what discovery/surfacing produced)
     updated_at: Optional[datetime] = None
 
 
