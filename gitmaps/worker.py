@@ -29,6 +29,7 @@ from gitmaps.config import Settings
 from gitmaps.db import Db
 from gitmaps.embeddings import EmbeddingRunner, build_embedding_provider
 from gitmaps.github.client import GitHubClient
+from gitmaps.github.graphql_client import GraphQLBatchClient, GraphQLClient
 from gitmaps.layout import LayoutRunner
 from gitmaps.momentum import MomentumConfig, MomentumRunner
 from gitmaps.promotion import GateConfig, PromotionRunner
@@ -38,10 +39,20 @@ from gitmaps.snapshotter import SnapshotRunner
 JOBS = ("discover", "snapshot_core", "snapshot_deep", "promote", "momentum", "embed", "classify", "cluster", "layout")
 
 
-def run_job(job: str, settings: Settings, store: RepoStore, client_factory: Callable[[Settings], object]) -> str:
+def run_job(
+    job: str,
+    settings: Settings,
+    store: RepoStore,
+    client_factory: Callable[[Settings], object],
+    graphql_factory: Callable[[Settings], GraphQLBatchClient] | None = None,
+) -> str:
     client = client_factory(settings)
     if job == "discover":
-        discovery = DiscoveryRunner(client, store).run()
+        # Discovery enriches the screened repos via a batched GraphQL fetch
+        # (metadata + README in one call per ~50 repos); REST search data is the
+        # fallback when the GraphQL path fails. Optional so tests stay hermetic.
+        graphql = graphql_factory(settings) if graphql_factory is not None else None
+        discovery = DiscoveryRunner(client, store, graphql=graphql).run()
         return f"discover: found={discovery.found} stored={discovery.stored} dropped={discovery.dropped}"
     if job == "promote":
         promoter = PromotionRunner(store, config=GateConfig(threshold=settings.significance_threshold))
@@ -115,6 +126,7 @@ def main(
     settings: Settings | None = None,
     db: Db | None = None,
     client_factory: Callable[[Settings], object] | None = None,
+    graphql_factory: Callable[[Settings], GraphQLBatchClient] | None = None,
 ) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) != 1 or argv[0] not in JOBS:
@@ -129,10 +141,12 @@ def main(
         return 1
 
     factory = client_factory or (lambda s: GitHubClient(list(s.github_tokens)))
+    # GraphQL enrichment is on by default for discovery; tests inject a fake.
+    gfactory = graphql_factory or (lambda s: GraphQLClient(list(s.github_tokens)))
     try:
         with (db if db is not None else Db.connect(settings.database_url)) as conn:
             store = RepoStore(conn)
-            summary = run_job(job, settings, store, factory)
+            summary = run_job(job, settings, store, factory, gfactory)
     except Exception as exc:  # propagates through `with` -> rollback, then reported
         print(f"{job} failed: {exc}", file=sys.stderr)
         return 1

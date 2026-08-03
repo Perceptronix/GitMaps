@@ -38,11 +38,13 @@ class FakeSession:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, str, dict, dict]] = []  # (method, url, params, headers)
+        self.bodies: list[Any] = []  # json request bodies, parallel to calls
         self.responses: list[FakeResponse] = []
         self.raise_once: Exception | None = None
 
-    def request(self, method: str, url: str, params: dict | None = None, headers: dict | None = None) -> FakeResponse:
+    def request(self, method: str, url: str, params: dict | None = None, headers: dict | None = None, json: Any | None = None) -> FakeResponse:
         self.calls.append((method, url, params or {}, headers or {}))
+        self.bodies.append(json)
         if self.raise_once is not None:
             exc, self.raise_once = self.raise_once, None
             raise exc
@@ -624,6 +626,29 @@ class RecordingClock:
     def sleep(self, seconds: float) -> None:
         self.sleeps.append(seconds)
         self.now_value += seconds
+
+
+class FakeGraphQL:
+    """Dependency-injected GraphQL batch client for discovery enrichment.
+
+    Scripted `fetch_repos_batch` results (a list of RepoData, or `error` to
+    simulate a whole-batch failure so the collector falls back to REST).
+    """
+
+    def __init__(
+        self,
+        repos: list[Any] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.repos = list(repos or [])
+        self.error = error
+        self.calls: list[list[str]] = []
+
+    def fetch_repos_batch(self, full_names: list[str]) -> list[Any]:
+        self.calls.append(list(full_names))
+        if self.error is not None:
+            raise self.error
+        return self.repos
 
 
 def make_repo(**overrides: Any) -> dict:

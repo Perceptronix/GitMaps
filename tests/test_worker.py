@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from gitmaps.config import Settings
 from gitmaps.worker import main
 
-from conftest import FakeClient, FakeDb, make_repo
+from conftest import FakeClient, FakeDb, FakeGraphQL, make_repo
 
 #: Two 5-point blobs around [1,0,0] / [0,1,0] — verified to make HDBSCAN emit
 #: two clusters with the worker's default min_cluster_size=5.
@@ -35,6 +35,9 @@ def test_discover_job_commits_and_reports(capsys) -> None:
         settings=settings(),
         db=db,
         client_factory=lambda s: FakeClient(repos=[make_repo()]),
+        # graphql enrichment defaults to the real client — inject a no-op so
+        # the unit test stays hermetic (no network)
+        graphql_factory=lambda s: FakeGraphQL(),
     )
 
     out = capsys.readouterr()
