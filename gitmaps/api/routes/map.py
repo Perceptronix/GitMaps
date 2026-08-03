@@ -34,9 +34,9 @@ async def get_map(
             cluster_id=row[0],
             domain=row[1],
             label=row[2],
-            member_count=0,  # Not available from list_cluster_positions
-            x=float(row[3]) if isinstance(row[3], Decimal) else row[3],
-            y=float(row[4]) if isinstance(row[4], Decimal) else row[4],
+            member_count=row[3] or 0,
+            x=float(row[4]) if isinstance(row[4], Decimal) else row[4],
+            y=float(row[5]) if isinstance(row[5], Decimal) else row[5],
         )
         for row in cluster_rows
     ]
@@ -44,7 +44,16 @@ async def get_map(
     # Get paginated repo positions using store method
     repo_rows = store.list_repo_positions(pagination.limit, pagination.offset)
     repos = [
-        RepoMapPosition(repo_id=row[0], x=float(row[1]) if isinstance(row[1], Decimal) else row[1], y=float(row[2]) if isinstance(row[2], Decimal) else row[2])
+        RepoMapPosition(
+            repo_id=row[0],
+            x=float(row[1]) if isinstance(row[1], Decimal) else row[1],
+            y=float(row[2]) if isinstance(row[2], Decimal) else row[2],
+            cluster_id=row[3],
+            stars=row[4] or 0,
+            owner=row[5],
+            name=row[6],
+            domain=row[7],
+        )
         for row in repo_rows
     ]
 

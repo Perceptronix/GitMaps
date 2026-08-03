@@ -99,6 +99,11 @@ export interface RepoMapPosition {
   repo_id: number;
   x: number;
   y: number;
+  cluster_id: number | null;
+  domain: string | null;
+  name: string | null;
+  owner: string | null;
+  stars: number;
 }
 
 export interface MapResponse {

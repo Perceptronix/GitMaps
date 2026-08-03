@@ -78,7 +78,8 @@ export default function HomePage() {
     <div className="flex h-screen w-screen overflow-hidden bg-background">
       <Header onViewChange={setView} currentView={view} />
 
-      <main className="flex-1 flex overflow-hidden">
+      {/* Main content — offset by sidebar width (w-56 = 14rem) */}
+      <main className="ml-[var(--sidebar-w)] flex-1 flex overflow-hidden">
         {view === 'map' && mapData && (
           <>
             <FilterPanel

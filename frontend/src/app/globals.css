@@ -3,6 +3,8 @@
 @tailwind utilities;
 
 :root {
+  /* Layout — sidebar width (must stay in sync across Header, page, FilterPanel) */
+  --sidebar-w: 14rem;
   --background: #0a0a0a;
   --foreground: #ededed;
   --muted: #1a1a1a;

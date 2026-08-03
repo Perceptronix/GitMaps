@@ -37,6 +37,11 @@ class RepoMapPosition(BaseModel):
     repo_id: int
     x: float
     y: float
+    cluster_id: Optional[int] = None
+    domain: Optional[str] = None
+    name: Optional[str] = None
+    owner: Optional[str] = None
+    stars: int = 0
 
 
 class ClusterPosition(BaseModel):

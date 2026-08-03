@@ -1,16 +1,19 @@
-import { api } from '@/lib/api';
-import axios from 'axios';
+const mockGet = jest.fn();
 
-// Mock axios
-jest.mock('axios');
+jest.mock('axios', () => ({
+  __esModule: true,
+  default: {
+    create: jest.fn(() => ({ get: mockGet })),
+  },
+}));
+
+// Re-import api after mock is installed
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { api } = require('@/lib/api');
 
 describe('ApiClient', () => {
-  let mockGet: jest.Mock;
-
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGet = jest.fn();
-    (axios.create as jest.Mock).mockReturnValue({ get: mockGet });
   });
 
   it('should have all required methods', () => {

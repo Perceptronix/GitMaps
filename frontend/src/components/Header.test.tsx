@@ -5,7 +5,7 @@ describe('Header', () => {
   it('renders navigation buttons', () => {
     render(<Header currentView="map" onViewChange={jest.fn()} />);
 
-    expect(screen.getByText('Map')).toBeInTheDocument();
+    expect(screen.getByText('Explore')).toBeInTheDocument();
     expect(screen.getByText('Search')).toBeInTheDocument();
     expect(screen.getByText('Trending')).toBeInTheDocument();
   });
@@ -14,7 +14,7 @@ describe('Header', () => {
     render(<Header currentView="search" onViewChange={jest.fn()} />);
 
     const searchButton = screen.getByText('Search').closest('button');
-    expect(searchButton).toHaveClass('bg-primary');
+    expect(searchButton).toHaveClass('bg-primary/15');
   });
 
   it('calls onViewChange when button clicked', () => {

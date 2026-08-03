@@ -63,7 +63,7 @@ export function FilterPanel({
   const hasFilters = selectedDomains.length > 0 || selectedClusters.length > 0;
 
   return (
-    <div className="fixed top-16 left-4 z-30 flex flex-col gap-2" role="region" aria-label="Filters">
+    <div className="fixed top-4 left-[calc(var(--sidebar-w)+0.5rem)] z-30 flex flex-col gap-2" role="region" aria-label="Filters">
       <div className="relative" ref={domainsRef}>
         <button
           onClick={() => setOpenDomains(!openDomains)}

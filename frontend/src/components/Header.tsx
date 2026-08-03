@@ -1,6 +1,6 @@
 'use client';
 
-import { Search, TrendingUp, Map, X } from 'lucide-react';
+import { Search, TrendingUp, Map } from 'lucide-react';
 
 type View = 'map' | 'search' | 'trending';
 
@@ -9,37 +9,43 @@ interface HeaderProps {
   onViewChange: (view: View) => void;
 }
 
-export function Header({ currentView, onViewChange }: HeaderProps) {
-  const views: { id: View; label: string; icon: React.ReactNode }[] = [
-    { id: 'map', label: 'Map', icon: <Map className="h-4 w-4" /> },
-    { id: 'search', label: 'Search', icon: <Search className="h-4 w-4" /> },
-    { id: 'trending', label: 'Trending', icon: <TrendingUp className="h-4 w-4" /> },
-  ];
+const NAV_ITEMS: { id: View; label: string; icon: React.ReactNode }[] = [
+  { id: 'map',      label: 'Explore',   icon: <Map className="h-5 w-5" /> },
+  { id: 'search',   label: 'Search',    icon: <Search className="h-5 w-5" /> },
+  { id: 'trending', label: 'Trending',  icon: <TrendingUp className="h-5 w-5" /> },
+];
 
+export function Header({ currentView, onViewChange }: HeaderProps) {
   return (
-    <header className="fixed top-0 left-0 right-0 z-40 border-b border-border bg-background/95 backdrop-blur-sm">
-      <div className="flex h-14 items-center px-4 gap-4">
-        <h1 className="flex items-center gap-2 text-lg font-bold text-primary">
-          <Map className="h-5 w-5" />
-          GitMaps
-        </h1>
-        <nav className="flex-1 flex justify-center gap-1" aria-label="Main navigation">
-          {views.map(({ id, label, icon }) => (
-            <button
-              key={id}
-              onClick={() => onViewChange(id)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                currentView === id
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-secondary'
-              }`}
-              aria-current={currentView === id ? 'page' : undefined}
-            >
-              {icon} {label}
-            </button>
-          ))}
-        </nav>
+    <aside className="fixed inset-y-0 left-0 z-40 flex w-[var(--sidebar-w)] flex-col border-r border-border/50 bg-background/95 backdrop-blur-sm">
+      {/* Logo */}
+      <div className="flex items-center gap-2 px-5 py-4">
+        <span className="text-xl font-bold text-primary">GitMaps</span>
       </div>
-    </header>
+
+      {/* Navigation */}
+      <nav className="flex flex-col gap-1 px-3" aria-label="Main navigation">
+        {NAV_ITEMS.map(({ id, label, icon }) => (
+          <button
+            key={id}
+            onClick={() => onViewChange(id)}
+            className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+              currentView === id
+                ? 'bg-primary/15 text-primary'
+                : 'text-muted-foreground hover:bg-secondary hover:text-foreground'
+            }`}
+            aria-current={currentView === id ? 'page' : undefined}
+          >
+            {icon}
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {/* Bottom attribution */}
+      <div className="mt-auto px-5 py-4 text-xs text-muted-foreground/60">
+        AI-powered GitHub intelligence
+      </div>
+    </aside>
   );
 }

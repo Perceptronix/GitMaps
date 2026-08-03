@@ -340,7 +340,8 @@ SET_CLUSTER_POSITION_SQL = "UPDATE clusters SET centroid_x = %s, centroid_y = %s
 #: Clusters with a centroid — the anchors the incremental pass places new
 #: members around.
 CLUSTER_POSITIONS_SQL = """
-SELECT id, domain, label, centroid_x, centroid_y FROM clusters WHERE centroid_x IS NOT NULL
+SELECT id, domain, label, member_count, centroid_x, centroid_y
+FROM clusters WHERE centroid_x IS NOT NULL
 """
 
 #: A cluster member with no map position yet is due for the incremental anchor.
@@ -871,12 +872,15 @@ class RepoStore:
         return [tuple(row) for row in cur.fetchall()]
 
     def list_repo_positions(self, limit: int, offset: int) -> list[tuple]:
-        """Get paginated repository map positions."""
+        """Get paginated repository map positions with cluster domain for coloring."""
         cur = self._db.execute(
             """
-            SELECT id, map_x, map_y FROM repos
-            WHERE map_x IS NOT NULL AND map_y IS NOT NULL
-            ORDER BY id
+            SELECT r.id, r.map_x, map_y, r.cluster_id, r.stars, r.owner, r.name,
+                   c.domain
+            FROM repos r
+            LEFT JOIN clusters c ON r.cluster_id = c.id
+            WHERE r.map_x IS NOT NULL AND r.map_y IS NOT NULL
+            ORDER BY r.id
             LIMIT %s OFFSET %s
             """,
             (limit, offset),
