@@ -170,6 +170,8 @@ class FakeStore:
         layout_member_rows: list[tuple] | None = None,
         layout_due: list[tuple] | None = None,
         cluster_position_rows: list[tuple] | None = None,
+        tracked_surfaced: list[tuple] | None = None,
+        repo_stats: dict[int, dict[str, int | None]] | None = None,
     ) -> None:
         self.state: dict[str, Any] = dict(state or {})
         self.upserted: list[dict] = []
@@ -225,6 +227,10 @@ class FakeStore:
         self.cluster_position_rows: list[tuple] = list(cluster_position_rows or [])  # (cluster_id, x, y)
         self.cluster_positions_written: list[tuple[int, float, float]] = []  # (cluster_id, x, y)
         self.repo_positions_written: list[tuple[int, float, float]] = []  # (x, y, repo_id)
+        # archive backfill pipeline
+        self.tracked_surfaced: list[tuple[int, str, str]] = list(tracked_surfaced or [])
+        self.tracked_surfaced_calls: list[tuple[int, int]] = []  # (limit, offset)
+        self.repo_stats: dict[int, dict[str, int | None]] = dict(repo_stats or {})
 
     def upsert(self, repo: dict) -> int:
         self.upserted.append(repo)
@@ -250,6 +256,13 @@ class FakeStore:
 
     def touch_snapshot_times(self, repo_id: int) -> None:
         self.touched.append(repo_id)
+
+    def list_tracked_surfaced(self, limit: int = 500, offset: int = 0) -> list[tuple[int, str, str]]:
+        self.tracked_surfaced_calls.append((limit, offset))
+        return self.tracked_surfaced[offset:offset + limit]
+
+    def get_repo_stats(self, repo_id: int) -> dict[str, int | None] | None:
+        return self.repo_stats.get(repo_id)
 
     def list_candidates(self, limit: int = 100) -> list[tuple]:
         return self.candidates[:limit]

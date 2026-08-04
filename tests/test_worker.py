@@ -220,3 +220,31 @@ def test_job_failure_rolls_back(capsys) -> None:
     assert db.rollbacks == 1
     assert db.commits == 0
     assert "boom" in err
+
+
+def test_archive_backfill_job_commits_and_reports(capsys) -> None:
+    db = FakeDb()
+    # Mock tracked/surfaced repos (the backfill universe query).
+    db.fetchall_by_substring = {
+        "WHERE tracked = true OR surfaced = true": [
+            (1001, "octocat", "repo-a"),
+            (1002, "octocat", "repo-b"),
+        ]
+    }
+    # No state yet -> start from 12 months ago; every hourly dump is empty, so
+    # nothing is written and the run stops at the batch cap.
+    db.fetchone_result = None
+
+    rc = main(
+        ["archive_backfill"],
+        settings=settings(),
+        db=db,
+        client_factory=lambda s: FakeClient(),
+        backfill_downloader=lambda url: [],
+    )
+
+    out = capsys.readouterr()
+    assert rc == 0
+    assert db.commits == 1
+    assert "archive_backfill: hours=24 events=0 snapshots=0" in out.out
+    assert "window_complete=False stopped_early=True" in out.out

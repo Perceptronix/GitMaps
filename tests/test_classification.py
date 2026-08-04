@@ -212,6 +212,102 @@ def test_taxonomy_fingerprint_changes_with_taxonomy() -> None:
     assert taxonomy_fingerprint(DEFAULT_TAXONOMY) == base
 
 
+def test_classify_cicd_cross_cutting_keywords() -> None:
+    # CI/CD keywords should match across multiple domains
+    text = "A project with github actions ci/cd pipeline for testing and deployment"
+    domains = classify_domains(text)
+    # Should match DevOps (primary CI/CD domain)
+    assert "DevOps" in domains
+    # And should also match domains that now include CI/CD keywords
+    assert "Backend" in domains  # backend has ci/cd, pipeline, testing, deployment
+    assert "Frontend" in domains  # frontend has ci/cd, pipeline, testing, deploy
+    assert "Cloud" in domains  # cloud has ci/cd, pipeline, deployment
+    assert "AI" in domains  # AI has ci/cd, pipeline, testing
+    assert "Machine Learning" in domains  # ML has ci/cd, pipeline, mlops
+    assert "Data Engineering" in domains  # Data Eng has ci/cd, pipeline
+
+
+def test_classify_cicd_specific_tools() -> None:
+    # Specific CI/CD tool keywords
+    assert "DevOps" in classify_domains("Uses gitlab ci for builds")
+    assert "DevOps" in classify_domains("Deployed with github workflow")
+    assert "DevOps" in classify_domains("Azure pipelines configuration")
+    assert "DevOps" in classify_domains("Jenkins build server")
+    assert "DevOps" in classify_domains("CircleCI config")
+    assert "DevOps" in classify_domains("Travis CI setup")
+    assert "DevOps" in classify_domains("ArgoCD for gitops")
+    assert "DevOps" in classify_domains("Flux continuous delivery")
+    assert "DevOps" in classify_domains("Tekton pipelines")
+    assert "DevOps" in classify_domains("Drone CI")
+    assert "DevOps" in classify_domains("Woodpecker CI")
+
+
+def test_classify_networking_protocol_keywords() -> None:
+    # Networking protocol-specific keywords
+    text = "An http proxy server handling https requests with grpc and websocket support"
+    domains = classify_domains(text)
+    assert "Networking" in domains
+    assert "Backend" in domains  # backend has grpc, rest api, graphql
+
+
+def test_classify_networking_infrastructure_keywords() -> None:
+    # Networking infrastructure keywords
+    assert "Networking" in classify_domains("nginx reverse proxy configuration")
+    assert "Networking" in classify_domains("haproxy load balancer setup")
+    assert "Networking" in classify_domains("envoy service mesh sidecar")
+    assert "Networking" in classify_domains("istio service mesh")
+    assert "Networking" in classify_domains("api gateway pattern")
+    assert "Networking" in classify_domains("cdn edge caching")
+    assert "Networking" in classify_domains("dns resolution")
+    assert "Networking" in classify_domains("express.js middleware")
+    assert "Networking" in classify_domains("express server routing")
+
+
+def test_classify_networking_http_specifics() -> None:
+    # HTTP-specific terms from real issues
+    text = "Fixed trailer header issue with status code 304 in express.js server"
+    domains = classify_domains(text)
+    assert "Networking" in domains
+
+
+def test_classify_cicd_no_false_positive_on_unrelated() -> None:
+    # CI/CD keywords shouldn't match unrelated text. The bare 2-letter
+    # abbreviations "ci"/"cd" are deliberately NOT taxonomy keywords (see the
+    # Backend block comment) — so none of these should land in DevOps OR
+    # Backend, even though "\bcd\b" word-bounds to the hyphen in "cd-rom".
+    for text in ("ancient civilization", "civic engagement", "abcd code",
+                 "cd-rom drive", "the ci directory", "scientific computing with ci"):
+        domains = classify_domains(text)
+        assert "DevOps" not in domains, text
+        assert "Backend" not in domains, text
+    # "pipeline" in a non-CI context is not DevOps (only compound CI terms are).
+    assert "DevOps" not in classify_domains("graphics rendering pipeline")
+
+
+def test_classify_no_bare_language_abbreviations() -> None:
+    # "ts", "js", "py" are not taxonomy keywords: the taxonomy is
+    # domain-based, not language-based (language lives on `repos.language`),
+    # and word-bounded bare abbreviations would misclassify unrelated prose.
+    # "js"/"ts"/"py" as standalone words match nothing here.
+    assert classify_domains("plain js for a small tool") == ()
+    assert classify_domains("a ts project") == ()
+    assert classify_domains("py scripts and notebooks") == ()
+    # Substrings of longer words must never match: "it's", "sets", "happy",
+    # "projects", "outputs".
+    for text in ("it's fine", "sets of tools", "happy users",
+                 "projects list", "outputs stored"):
+        assert classify_domains(text) == (), text
+
+
+def test_classify_networking_no_false_positive_on_unrelated() -> None:
+    # Networking keywords shouldn't match unrelated text
+    assert "Networking" not in classify_domains("status code review meeting")
+    assert "Networking" not in classify_domains("header image for blog")
+    assert "Networking" not in classify_domains("trailer park management")
+    assert "Networking" not in classify_domains("proxy war history")
+    assert "Networking" not in classify_domains("express shipping")
+
+
 # -- pure layer: config validation ------------------------------------------
 
 def test_config_validates_readme_max_chars() -> None:

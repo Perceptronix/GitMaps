@@ -68,6 +68,22 @@ UPDATE repos SET
 WHERE id = %s
 """
 
+#: The GH Archive backfill's repo universe: everything already tracked or
+#: surfaced, so a historical row is only written for repos we care about —
+#: never the whole GH Archive firehose.
+BACKFILL_REPOS_SQL = """
+SELECT id, owner, name FROM repos
+WHERE tracked = true OR surfaced = true
+ORDER BY id
+LIMIT %s OFFSET %s
+"""
+
+#: A repo's current core signals — the anchor the backfill walks backwards
+#: from to reconstruct historical absolute counts.
+BACKFILL_CURRENT_STATS_SQL = """
+SELECT stars, forks, open_issues FROM repos WHERE id = %s
+"""
+
 DUE_CORE_SQL = """
 SELECT r.id, r.owner, r.name FROM repos r
 WHERE r.tracked AND (r.last_snapshot_at IS NULL OR r.last_snapshot_at < %s)
@@ -633,6 +649,26 @@ class RepoStore:
     def touch_snapshot_times(self, repo_id: int) -> None:
         """Mark a repo as freshly snapshotted (sets first time on first snapshot)."""
         self._db.execute(TOUCH_SNAPSHOT_SQL, (repo_id,))
+
+    # -- GH Archive backfill pipeline ---------------------------------------
+
+    def list_tracked_surfaced(self, limit: int = 500, offset: int = 0) -> list[tuple[int, str, str]]:
+        """(id, owner, name) for every tracked or surfaced repo — the backfill universe."""
+        cur = self._db.execute(BACKFILL_REPOS_SQL, (limit, offset))
+        return [tuple(row) for row in cur.fetchall()]
+
+    def get_repo_stats(self, repo_id: int) -> dict[str, int | None] | None:
+        """The repo's current core signals — the anchor the backfill walks back from.
+
+        Backfilled rows are reconstructed from these current values plus the GH
+        Archive growth events, so the count at a historical day is the repo's
+        current count minus everything that grew after that day.
+        """
+        cur = self._db.execute(BACKFILL_CURRENT_STATS_SQL, (repo_id,))
+        row = cur.fetchone()
+        if row is None:
+            return None
+        return {"stars": row[0], "forks": row[1], "open_issues": row[2]}
 
     # -- promotion pipeline (architecture §4) -------------------------------
 

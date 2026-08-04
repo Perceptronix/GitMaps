@@ -56,7 +56,8 @@ DEFAULT_TAXONOMY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("AI", (
         "ai", "a.i.", "artificial intelligence", "generative ai", "ai assistant",
         "ai-powered", "ai tool", "ai model", "llm", "large language model",
-        "machine intelligence",
+        "machine intelligence", "ci/cd", "pipeline", "workflow", "github actions",
+        "testing", "model training", "mlops",
     )),
     ("AI Agents", (
         "ai agent", "agentic", "autonomous agent", "multi-agent", "agent framework",
@@ -69,22 +70,34 @@ DEFAULT_TAXONOMY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Machine Learning", (
         "machine learning", "deep learning", "neural network", "pytorch", "tensorflow",
         "scikit-learn", "sklearn", "keras", "jax", "gradient descent", "model training",
-        "ml pipeline", "inference engine",
+        "ml pipeline", "inference engine", "ci/cd", "pipeline", "workflow",
+        "github actions", "mlops", "kubeflow", "mlflow", "experiment tracking",
     )),
     ("Frontend", (
         "frontend", "front-end", "react", "vue", "angular", "svelte", "next.js",
         "nextjs", "tailwind", "css", "component library", "design system",
-        "browser extension", "ui kit",
+        "browser extension", "ui kit", "ci/cd", "pipeline", "workflow",
+        "github actions", "testing", "jest", "vitest", "playwright", "cypress",
+        "storybook", "chromatic", "deploy", "deployment", "vercel", "netlify",
     )),
+    # No bare 2-letter abbreviations ("ci", "cd", "ts", "js", "py") as keywords:
+    # word-bounded "\bci\b" / "\bcd\b" also match "cd-rom drive" and standalone
+    # "ci" in unrelated prose. The compound "ci/cd" plus named tools ("gitlab
+    # ci", "circleci") carry the CI/CD signal without those false positives.
     ("Backend", (
         "backend", "back-end", "api server", "server-side", "rest api", "graphql",
         "microservice", "http server", "web server", "middleware", "webhook server", "grpc",
+        "ci/cd", "pipeline", "workflow", "github actions", "testing", "integration test",
+        "unit test", "test suite", "deploy", "deployment", "release",
     )),
     ("DevOps", (
         "devops", "ci/cd", "continuous integration", "continuous delivery", "docker",
         "kubernetes", "k8s", "terraform", "ansible", "infrastructure as code",
-        "deployment pipeline", "github actions", "monitoring", "observability",
-        "prometheus", "grafana", "container orchestration",
+        "deployment pipeline", "github actions", "gitlab ci", "github workflow",
+        "gitlab pipeline", "azure pipelines", "jenkins", "circleci", "travis",
+        "build pipeline", "release pipeline", "monitoring", "observability",
+        "prometheus", "grafana", "container orchestration", "helm", "argocd",
+        "flux", "tekton", "drone", "woodpecker",
     )),
     ("Cybersecurity", (
         "cybersecurity", "cyber security", "penetration testing", "pentest", "exploit",
@@ -94,7 +107,8 @@ DEFAULT_TAXONOMY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Data Engineering", (
         "data engineering", "etl", "data pipeline", "data warehouse", "spark", "airflow",
         "kafka", "parquet", "data lake", "streaming pipeline", "data processing",
-        "hadoop", "flink", "dbt",
+        "hadoop", "flink", "dbt", "ci/cd", "pipeline", "workflow", "github actions",
+        "data orchestration", "data quality", "data testing",
     )),
     ("Mobile", (
         "mobile app", "ios", "android", "react native", "flutter", "swift",
@@ -111,11 +125,18 @@ DEFAULT_TAXONOMY: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("Networking", (
         "networking", "network protocol", "tcp/ip", "dns", "http proxy", "vpn",
         "packet capture", "socket server", "mesh network", "p2p", "network monitoring",
-        "nat traversal", "routing",
+        "nat traversal", "routing", "status code 200", "status code 301", "status code 302",
+        "status code 304", "status code 400", "status code 401", "status code 403",
+        "status code 404", "status code 500", "status code 502", "status code 503",
+        "proxy server", "http header", "trailer header", "express.js", "express server",
+        "websocket", "grpc", "rest api", "graphql", "api gateway", "load balancer",
+        "reverse proxy", "cdn", "service mesh", "istio", "envoy", "nginx", "haproxy",
     )),
     ("Cloud", (
         "cloud", "aws", "azure", "gcp", "google cloud", "cloud-native", "serverless",
         "lambda", "s3", "ec2", "cloud storage", "saas", "multi-cloud", "cloud infrastructure",
+        "ci/cd", "pipeline", "workflow", "github actions", "terraform", "cloudformation",
+        "deployment", "infrastructure as code", "monitoring", "observability",
     )),
     ("Databases", (
         "database", "sql", "nosql", "postgres", "postgresql", "mysql", "sqlite",

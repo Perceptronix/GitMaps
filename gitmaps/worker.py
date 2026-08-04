@@ -22,6 +22,7 @@ from __future__ import annotations
 import sys
 from typing import Callable, Sequence
 
+from gitmaps.archive_backfill import ArchiveBackfillRunner
 from gitmaps.classification import ClassificationRunner
 from gitmaps.clustering import ClusteringRunner
 from gitmaps.collector import DiscoveryRunner
@@ -36,7 +37,10 @@ from gitmaps.promotion import GateConfig, PromotionRunner
 from gitmaps.repo_store import RepoStore
 from gitmaps.snapshotter import SnapshotRunner
 
-JOBS = ("discover", "snapshot_core", "snapshot_deep", "promote", "momentum", "embed", "classify", "cluster", "layout")
+JOBS = (
+    "discover", "snapshot_core", "snapshot_deep", "promote", "momentum",
+    "embed", "classify", "cluster", "layout", "archive_backfill",
+)
 
 
 def run_job(
@@ -45,6 +49,7 @@ def run_job(
     store: RepoStore,
     client_factory: Callable[[Settings], object],
     graphql_factory: Callable[[Settings], GraphQLBatchClient] | None = None,
+    backfill_downloader: Callable[[str], list[dict]] | None = None,
 ) -> str:
     client = client_factory(settings)
     if job == "discover":
@@ -116,6 +121,20 @@ def run_job(
             f"layout: clusters={layout_result.clusters_placed} "
             f"repos={layout_result.repos_placed} full={layout_result.force_full}"
         )
+    if job == "archive_backfill":
+        # GH Archive is a bulk, token-free service — no GitHub rate budget is
+        # charged (unlike every GitHub-API-backed stage); the runner's own
+        # batch_hours / max_runtime_seconds caps bound each invocation.
+        runner = ArchiveBackfillRunner(
+            store, downloader=backfill_downloader
+        )
+        result = runner.run()
+        return (
+            f"archive_backfill: hours={result.hours_processed} "
+            f"events={result.events_processed} snapshots={result.snapshots_written} "
+            f"repos={result.repos_seen} window_complete={result.window_complete} "
+            f"stopped_early={result.stopped_early}"
+        )
     runner = SnapshotRunner(client, store, budget_per_hour=settings.rate_budget_per_hour)
     if job == "snapshot_core":
         result = runner.run_core()
@@ -134,6 +153,7 @@ def main(
     db: Db | None = None,
     client_factory: Callable[[Settings], object] | None = None,
     graphql_factory: Callable[[Settings], GraphQLBatchClient] | None = None,
+    backfill_downloader: Callable[[str], list[dict]] | None = None,
 ) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if len(argv) != 1 or argv[0] not in JOBS:
@@ -153,7 +173,7 @@ def main(
     try:
         with (db if db is not None else Db.connect(settings.database_url)) as conn:
             store = RepoStore(conn)
-            summary = run_job(job, settings, store, factory, gfactory)
+            summary = run_job(job, settings, store, factory, gfactory, backfill_downloader)
     except Exception as exc:  # propagates through `with` -> rollback, then reported
         print(f"{job} failed: {exc}", file=sys.stderr)
         return 1
