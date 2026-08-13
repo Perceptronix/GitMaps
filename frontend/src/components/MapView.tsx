@@ -519,8 +519,8 @@ export function MapView({
         style={{ opacity: 0, transition: 'opacity 0.12s ease' }}
       />
 
-      {/* Zoom controls */}
-      <div className="absolute bottom-4 right-4 z-30 flex flex-col gap-1">
+      {/* Zoom controls — top-right */}
+      <div className="absolute top-4 right-4 z-30 flex flex-col gap-1">
         {[
           { label: 'Zoom in', icon: '+', fn: () => zoomBy(1.5) },
           { label: 'Zoom out', icon: '−', fn: () => zoomBy(0.67) },
@@ -537,9 +537,9 @@ export function MapView({
         ))}
       </div>
 
-      {/* Legend */}
+      {/* Legend — bottom-left */}
       {visibleDomains.length > 0 && (
-        <div className="absolute bottom-4 left-4 z-30 flex max-w-[40%] flex-wrap gap-x-4 gap-y-1 rounded-lg border border-white/10 bg-black/60 px-3 py-2 backdrop-blur-sm">
+        <div className="absolute bottom-4 left-4 z-30 flex max-w-[calc(50%-2rem)] flex-wrap gap-x-4 gap-y-1 rounded-lg border border-white/10 bg-black/60 px-3 py-2 backdrop-blur-sm">
           {visibleDomains.map((domain) => (
             <div key={domain} className="flex items-center gap-1.5 text-[10px] font-medium tracking-wide text-white/55">
               <span
@@ -552,14 +552,14 @@ export function MapView({
         </div>
       )}
 
-      {/* Stats */}
-      <div className="absolute right-4 top-4 z-30 font-mono text-[10px] tracking-tight text-white/30">
+      {/* Stats — bottom-right */}
+      <div className="absolute bottom-4 right-4 z-30 font-mono text-[10px] tracking-tight text-white/30">
         {filteredRepos.length} repos · {filteredClusters.length} clusters
       </div>
 
-      {/* Search — pinned bottom, wired to the existing search view */}
+      {/* Search — bottom-center, reduced width to avoid legend collision */}
       {onSearch && (
-        <div className="absolute bottom-4 left-1/2 z-30 w-96 max-w-[calc(100%-2rem)] -translate-x-1/2">
+        <div className="absolute bottom-4 left-1/2 z-30 w-[320px] max-w-[calc(100%-4rem)] -translate-x-1/2">
           <form
             onSubmit={(e) => {
               e.preventDefault();

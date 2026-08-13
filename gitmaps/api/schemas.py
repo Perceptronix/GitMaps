@@ -39,6 +39,7 @@ class RepoMapPosition(BaseModel):
     y: float
     cluster_id: Optional[int] = None
     domain: Optional[str] = None
+    domains: list[str] = Field(default_factory=list)
     name: Optional[str] = None
     owner: Optional[str] = None
     stars: int = 0
@@ -55,6 +56,15 @@ class ClusterPosition(BaseModel):
     y: float
 
 
+class DomainCentroid(BaseModel):
+    """Domain centroid position for color blending."""
+
+    domain: str
+    x: float
+    y: float
+    cluster_count: int
+
+
 class MapResponse(BaseModel):
     """Full map response with clusters and repos."""
 
@@ -62,6 +72,7 @@ class MapResponse(BaseModel):
     repos: list[RepoMapPosition]
     total: int = 0  # repos with a map position (what discovery/surfacing produced)
     updated_at: Optional[datetime] = None
+    domain_centroids: list[DomainCentroid] = Field(default_factory=list)
 
 
 class ClusterSummary(BaseModel):

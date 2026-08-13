@@ -54,7 +54,9 @@ export function TrendingView({ onRepoClick }: TrendingViewProps) {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="border-b border-border p-4 bg-background/95 backdrop-blur-sm sticky top-14 z-10">
+      <div className="border-b border-border p-4 sticky top-0 z-10 backdrop-blur-sm"
+        style={{ borderColor: 'var(--border-solid)', background: 'rgba(13,14,20,0.96)' }}
+      >
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
             <h2 className="text-xl font-bold">Trending Repositories</h2>

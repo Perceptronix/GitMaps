@@ -424,8 +424,8 @@ class FakeStore:
     def list_repo_positions(self, limit: int, offset: int) -> list[tuple]:
         """Get paginated repository map positions."""
         # FakeStore doesn't store individual repo positions, so we derive from
-        # layout_member_rows, matching the real store's 8-column contract:
-        # (repo_id, x, y, cluster_id, stars, owner, name, domain)
+        # layout_member_rows, matching the real store's 9-column contract:
+        # (repo_id, x, y, cluster_id, stars, owner, name, cluster_domain, repo_domains)
         result = []
         for repo_id, cluster_id, embedding in self.layout_member_rows:
             # Check if this cluster has a position
@@ -437,9 +437,11 @@ class FakeStore:
                         # Handle both old (3-tuple) and new (5-tuple) format
                         if len(c) == 3:
                             x, y = c[1], c[2]
+                            cluster_domain = "Unknown"
                         else:
                             x, y = c[3], c[4]
-                        result.append((repo_id, x, y, cluster_id, 0, "", "", "Unknown"))
+                            cluster_domain = c[1]  # domain
+                        result.append((repo_id, x, y, cluster_id, 0, "", "", cluster_domain, ["AI"]))
                         break
         return result[offset:offset + limit]
 

@@ -35,7 +35,7 @@ describe('FilterPanel', () => {
       />
     );
 
-    expect(screen.getByText('1')).toBeInTheDocument();
+    expect(screen.getByText('1 active')).toBeInTheDocument();
   });
 
   it('toggles domain selection', () => {
@@ -51,11 +51,9 @@ describe('FilterPanel', () => {
       />
     );
 
-    const domainButton = screen.getByText('Domains').closest('button') as HTMLButtonElement;
-    fireEvent.click(domainButton);
-
-    const aiCheckbox = screen.getByLabelText('AI');
-    fireEvent.click(aiCheckbox);
+    // Click the AI domain button directly by its label
+    const aiButton = screen.getByLabelText('Toggle AI filter');
+    fireEvent.click(aiButton);
 
     expect(onDomainsChange).toHaveBeenCalledWith(['AI']);
   });

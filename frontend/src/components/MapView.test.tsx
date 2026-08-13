@@ -8,12 +8,12 @@ const clusters: ClusterPosition[] = [
 ];
 
 const repos: RepoMapPosition[] = [
-  { repo_id: 10, x: -0.31, y: 0.11, cluster_id: 1, domain: 'AI', name: 'llm', owner: 'acme', stars: 5000 },
-  { repo_id: 11, x: -0.28, y: 0.09, cluster_id: 1, domain: 'AI', name: 'embed', owner: 'acme', stars: 1200 },
-  { repo_id: 12, x: -0.29, y: 0.13, cluster_id: 1, domain: 'AI', name: 'rerank', owner: 'acme', stars: 800 },
-  { repo_id: 20, x: 0.41, y: -0.21, cluster_id: 2, domain: 'Web', name: 'ui', owner: 'bob', stars: 300 },
-  { repo_id: 21, x: 0.39, y: -0.19, cluster_id: 2, domain: 'Web', name: 'hooks', owner: 'bob', stars: 90 },
-  { repo_id: 99, x: 0.05, y: 0.05, cluster_id: null, domain: null, name: 'misc', owner: 'carol', stars: 10 },
+  { repo_id: 10, x: -0.31, y: 0.11, cluster_id: 1, domain: 'AI', domains: ['AI'], name: 'llm', owner: 'acme', stars: 5000 },
+  { repo_id: 11, x: -0.28, y: 0.09, cluster_id: 1, domain: 'AI', domains: ['AI'], name: 'embed', owner: 'acme', stars: 1200 },
+  { repo_id: 12, x: -0.29, y: 0.13, cluster_id: 1, domain: 'AI', domains: ['AI'], name: 'rerank', owner: 'acme', stars: 800 },
+  { repo_id: 20, x: 0.41, y: -0.21, cluster_id: 2, domain: 'Web', domains: ['Web'], name: 'ui', owner: 'bob', stars: 300 },
+  { repo_id: 21, x: 0.39, y: -0.19, cluster_id: 2, domain: 'Web', domains: ['Web'], name: 'hooks', owner: 'bob', stars: 90 },
+  { repo_id: 99, x: 0.05, y: 0.05, cluster_id: null, domain: null, domains: ['Uncategorized'], name: 'misc', owner: 'carol', stars: 10 },
 ];
 
 describe('MapView', () => {

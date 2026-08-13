@@ -101,9 +101,17 @@ export interface RepoMapPosition {
   y: number;
   cluster_id: number | null;
   domain: string | null;
+  domains: string[];
   name: string | null;
   owner: string | null;
   stars: number;
+}
+
+export interface DomainCentroid {
+  domain: string;
+  x: number;
+  y: number;
+  cluster_count: number;
 }
 
 export interface MapResponse {
@@ -112,6 +120,7 @@ export interface MapResponse {
   /** Total repos with a map position (what discovery/surfacing produced). */
   total: number;
   updated_at: string | null;
+  domain_centroids: DomainCentroid[];
 }
 
 export interface ClusterSummary {

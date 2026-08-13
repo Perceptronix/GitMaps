@@ -6,7 +6,7 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends
 
 from gitmaps.api.deps import StoreDep
-from gitmaps.api.schemas import MapResponse, ClusterPosition, RepoMapPosition
+from gitmaps.api.schemas import MapResponse, ClusterPosition, RepoMapPosition, DomainCentroid
 from gitmaps.repo_store import RepoStore
 
 router = APIRouter()
@@ -41,6 +41,22 @@ async def get_map(
         for row in cluster_rows
     ]
 
+    # Build domain centroids from clusters (one centroid per domain)
+    # Domain centroid = mean of cluster centroids in that domain
+    domain_centroids_map: dict[str, list[tuple[float, float]]] = {}
+    for c in clusters:
+        domain_centroids_map.setdefault(c.domain, []).append((c.x, c.y))
+
+    domain_centroids = [
+        {
+            "domain": domain,
+            "x": sum(p[0] for p in pts) / len(pts),
+            "y": sum(p[1] for p in pts) / len(pts),
+            "cluster_count": len(pts),
+        }
+        for domain, pts in domain_centroids_map.items()
+    ]
+
     # Get every positioned repo (no LIMIT — see docstring above)
     repo_rows = store.list_all_repo_positions()
     repos = [
@@ -53,6 +69,7 @@ async def get_map(
             owner=row[5],
             name=row[6],
             domain=row[7],
+            domains=list(row[8]) if row[8] else [],
         )
         for row in repo_rows
     ]
@@ -63,9 +80,21 @@ async def get_map(
     # Get the latest layout run timestamp
     updated_at = store.get_state("layout.last_run_at")
 
+    # Convert domain_centroids to proper type
+    domain_centroids_typed: list[DomainCentroid] = [
+        DomainCentroid(
+            domain=str(dc["domain"]),  # type: ignore[arg-type]
+            x=float(dc["x"]),  # type: ignore[arg-type]
+            y=float(dc["y"]),  # type: ignore[arg-type]
+            cluster_count=int(dc["cluster_count"]),  # type: ignore[call-overload,arg-type]
+        )
+        for dc in domain_centroids
+    ]
+
     return MapResponse(
         clusters=clusters,
         repos=repos,
         total=total_repos,
         updated_at=updated_at,
+        domain_centroids=domain_centroids_typed,
     )

@@ -90,14 +90,21 @@ export function RepoDetailPanel({ repo, similar, onClose }: RepoDetailPanelProps
     <div
       ref={panelRef}
       tabIndex={-1}
-      className="fixed right-0 top-14 bottom-0 w-full max-w-2xl bg-background border-l border-border shadow-xl overflow-y-auto z-50 animate-slide-in"
+      className="fixed right-0 top-0 bottom-0 w-full max-w-xl overflow-y-auto z-50 animate-slide-in"
+      style={{
+        background: 'var(--bg-panel)',
+        borderLeft: '1px solid var(--border-solid)',
+        boxShadow: '-8px 0 40px rgba(0,0,0,0.5)',
+      }}
       role="dialog"
       aria-modal="true"
       aria-labelledby="repo-title"
     >
       <div className="flex h-full flex-col">
         {/* Header */}
-        <div className="flex items-start justify-between border-b border-border p-4 bg-background/95 backdrop-blur-sm sticky top-0 z-10">
+        <div className="flex items-start justify-between border-b p-4 sticky top-0 z-10 backdrop-blur-sm"
+          style={{ borderColor: 'var(--border-solid)', background: 'rgba(19,20,26,0.96)' }}
+        >
           <div className="flex-1 min-w-0">
             <h2 id="repo-title" className="text-lg font-bold truncate">{repo.full_name}</h2>
             <p className="text-sm text-muted-foreground mt-0.5 truncate">{repo.description || 'No description'}</p>

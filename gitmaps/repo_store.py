@@ -928,11 +928,16 @@ class RepoStore:
 
         The semantic map renders the whole universe of positioned repos; a
         LIMIT here silently truncates the visualization to the first page.
+
+        Returns (id, map_x, map_y, cluster_id, stars, owner, name, cluster_domain,
+        repo_domains) — the final element is the repo's *own* technology-domain
+        array, which the canvas map blends into multi-domain colors. The joined
+        cluster domain is kept only as a fallback single domain.
         """
         cur = self._db.execute(
             """
-            SELECT r.id, r.map_x, map_y, r.cluster_id, r.stars, r.owner, r.name,
-                   c.domain
+            SELECT r.id, r.map_x, r.map_y, r.cluster_id, r.stars, r.owner, r.name,
+                   c.domain, r.domains
             FROM repos r
             LEFT JOIN clusters c ON r.cluster_id = c.id
             WHERE r.map_x IS NOT NULL AND r.map_y IS NOT NULL

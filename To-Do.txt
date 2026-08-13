@@ -1,3 +1,260 @@
-TASK 1: /ui-ux-pro-max:ui-styling /ui-ux-pro-max:ui-ux-pro-max make the frontend professionala nd perfect logical flow and fix overlap and outofbox cotnent and proper buttons placing and perfect allignment
+## Task: Reverse-Engineer and Adapt the AlphaXiv Map for GitMaps
 
-TASK 2: /cavecrew /ui-ux-pro-max:ui-ux-pro-max /ui-ux-pro-max:ui-styling /implement Add a second, coarser clustering level so the map supports alphaXiv-style zoom-to-reveal: zoomed out shows domain-level blobs (existing classification.py domains), zooming into one reveals its HDBSCAN sub-clusters (existing clustering.py output) as the current view already renders them. Don't re-cluster — this is a display hierarchy over data you already have: domain (parent) → existing cluster (child). Add a parent_domain field to the cluster response in map.py (already derivable from clusters.domain, no schema change needed). On the frontend, MapView.tsx should render only domain-level aggregate blobs by default (sum member repos per domain, single label, single color), and on click/zoom-in, transition to showing that domain's existing sub-clusters at full detail — reuse the current force-simulation code for the zoomed-in view, don't rewrite it. Add a breadcrumb (All / <Domain>) above the map for zoom-out. Do not touch layout.py's MDS/PCA math or the clustering algorithm — this is purely a two-level rendering mode over existing cluster/domain data. 
+You are working inside the GitMaps repository.
+
+A complete AlphaXiv reference-code folder has been added to this repository. Your task is to **deeply inspect the entire reference implementation**, with particular emphasis on its map/visualization system, reverse-engineer how it works, and then determine how to reproduce the same behavior and interaction model for GitMaps.
+
+### 1. Analyze the reference implementation first
+
+DO NOT start coding immediately.
+
+Read the entire AlphaXiv reference folder and identify:
+
+* map entry points
+* map rendering architecture
+* coordinate representation
+* point/node data structures
+* cluster/topic representation
+* centroid calculation or usage
+* color generation
+* topic/domain visualization
+* spatial indexing/bucketing
+* zoom and pan
+* hover behavior
+* selection behavior
+* search-to-map interaction
+* filtering
+* labels
+* tooltips
+* animations/transitions
+* viewport/camera handling
+* performance optimizations
+* canvas/SVG/WebGL usage
+* data preprocessing
+* API/data contracts
+* any worker/off-thread computation
+* any algorithms responsible for positioning or visual grouping
+
+Trace the complete flow:
+
+REFERENCE DATA → PROCESSING → MAP STATE → RENDERING → USER INTERACTION
+
+Do not infer behavior from filenames alone. Follow the actual implementation and call/data flow.
+
+### 2. Produce a reverse-engineering report before implementation
+
+Create a concise technical report documenting:
+
+1. Reference architecture
+2. Map data model
+3. Coordinate/layout model
+4. Cluster/topic model
+5. Rendering pipeline
+6. Spatial indexing strategy
+7. Interaction model
+8. Filtering/search behavior
+9. Performance techniques
+10. Important algorithms/functions
+11. Which behaviors are reusable in GitMaps
+12. Which behaviors are incompatible with GitMaps
+13. Exact mapping between AlphaXiv concepts and GitMaps concepts
+
+Include source-file/function references from the reference implementation wherever possible.
+
+### 3. Map AlphaXiv concepts onto GitMaps
+
+GitMaps already has its own semantic pipeline:
+
+GitHub
+→ Discovery
+→ Promotion
+→ Snapshots
+→ Momentum
+→ Embeddings
+→ Technology Classification
+→ HDBSCAN Clustering
+→ Deterministic Layout
+→ FastAPI
+→ Next.js
+
+GitMaps technology domains are things such as:
+
+* AI
+* AI Agents
+* RAG
+* Machine Learning
+* Frontend
+* Backend
+* DevOps
+* Cybersecurity
+* Data Engineering
+* Mobile
+* Game Development
+* Blockchain
+* Networking
+* Cloud
+* Databases
+
+Do NOT replace GitMaps' semantic/domain architecture with programming-language clustering.
+
+The objective is to reproduce the **map behavior and visualization architecture**, while using GitMaps' own semantic data.
+
+### 4. Reproduce behavior, not source code
+
+Implement the equivalent behavior in GitMaps.
+
+Do NOT blindly copy AlphaXiv source code.
+
+Do NOT copy proprietary/reference implementation code line-for-line.
+
+Instead:
+
+* understand the algorithms
+* recreate equivalent behavior
+* adapt the data model
+* preserve GitMaps architecture
+* reuse existing GitMaps services where possible
+* avoid introducing unnecessary dependencies
+
+The result should behave as similarly as technically possible while remaining native to GitMaps.
+
+### 5. Preserve GitMaps' existing pipeline
+
+Do NOT rewrite or replace:
+
+* HDBSCAN clustering
+* technology classification
+* embeddings
+* similarity service
+* deterministic layout
+* momentum engine
+* FastAPI API contracts
+
+Only modify them if the reference implementation reveals a concrete architectural requirement for reproducing the map behavior.
+
+If a change is necessary, explain why before making it.
+
+### 6. Map GitMaps data to the reference model
+
+Determine how the reference implementation's concepts map to GitMaps.
+
+For example:
+
+Reference:
+`researcher → topic → topic centroid → map position`
+
+GitMaps may become:
+
+`repository → technology domains → cluster/domain centroids → map position`
+
+Determine the correct mapping from the actual reference code rather than assuming this example is correct.
+
+### 7. Pay special attention to multi-domain visualization
+
+GitMaps repositories can belong to multiple technology domains.
+
+Do not force the visualization into a programming-language-based model.
+
+Investigate whether the reference map supports concepts such as:
+
+* multiple topic influence
+* proximity to multiple centroids
+* blended/weighted visual representation
+* topic regions
+* semantic neighborhoods
+
+If the reference implementation has an equivalent mechanism, reproduce its behavior for GitMaps domains.
+
+### 8. Performance is critical
+
+GitMaps may eventually contain thousands to hundreds of thousands of repositories.
+
+Analyze and reproduce useful techniques from the reference implementation for:
+
+* rendering large numbers of points
+* spatial lookup
+* hit testing
+* zooming
+* panning
+* filtering
+* search
+* hover
+* selection
+* avoiding unnecessary React renders
+* canvas rendering
+* viewport culling
+* batching
+
+Do not introduce an O(N²) implementation simply because it is easier.
+
+### 9. Integrate with the existing GitMaps frontend
+
+Inspect the existing Phase10 Next.js frontend before changing it.
+
+Prefer extending:
+
+* `MapView.tsx`
+* API client
+* existing types
+* existing filtering infrastructure
+
+rather than creating a second independent map system.
+
+The final map should remain a GitMaps component, not an embedded AlphaXiv application.
+
+### 10. Validation
+
+After implementation:
+
+* run the complete backend test suite
+* run frontend tests
+* run TypeScript checking
+* run mypy
+* validate against the existing live GitMaps data
+* compare the resulting behavior with the reference implementation
+* verify zoom/pan/hover/click/search/filter interactions
+* verify map rendering with the real GitMaps cluster/domain data
+* verify performance with the largest available dataset
+
+Do not claim equivalence without testing the relevant behavior.
+
+### 11. Important constraints
+
+Before modifying code, inspect the repository and determine:
+
+* current GitMaps map implementation
+* current layout output
+* current API `/map` response
+* cluster schema
+* domain schema
+* repository position schema
+* frontend rendering implementation
+
+Do not duplicate existing functionality.
+
+Do not introduce UMAP or other heavy dependencies unless the reference implementation proves that they are actually required.
+
+Do not replace HDBSCAN merely to imitate the reference.
+
+Do not optimize prematurely.
+
+### 12. Final deliverables
+
+Provide:
+
+1. Reverse-engineering report
+2. AlphaXiv → GitMaps architecture mapping
+3. Implementation plan
+4. Implemented GitMaps map adaptation
+5. Tests
+6. Real-data validation
+7. Performance findings
+8. List of files changed
+9. Dependencies added/removed
+10. Known behavioral differences from the reference implementation
+
+Most importantly:
+
+**First understand exactly how the reference map works. Then reproduce its behavior using GitMaps' own semantic/domain/clustering data and architecture.**
+
+Do not make assumptions where the reference source can answer the question.

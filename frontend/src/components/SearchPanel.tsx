@@ -74,9 +74,11 @@ export function SearchPanel({ onRepoClick, initialQuery }: SearchPanelProps) {
   const hasAdvancedFilters = topics.length > 0 || domains.length > 0 || minStars !== '' || maxStars !== '' || tracked !== null || surfaced !== null || hasCluster !== null || hasMapPosition !== null;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" style={{ background: 'var(--bg)', color: 'var(--text)' }}>
       {/* Search Header */}
-      <div className="border-b border-border p-4 bg-background/95 backdrop-blur-sm sticky top-14 z-10">
+      <div className="border-b p-4 sticky top-0 z-10 backdrop-blur-sm"
+        style={{ borderColor: 'var(--border-solid)', background: 'rgba(13,14,20,0.96)' }}
+      >
         <form onSubmit={handleSearch} className="space-y-4">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
